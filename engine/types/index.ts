@@ -128,9 +128,9 @@ export const CONSTANTS = {
     executive: 50_000,
   },
   RECRUITMENT_CANDIDATES: {
-    basic: 3,
-    premium: 5,
-    executive: 4,
+    basic: 4,
+    premium: 6,
+    executive: 8,
   },
   RECRUITMENT_STAT_RANGE: {
     basic: { min: 70, max: 110 },

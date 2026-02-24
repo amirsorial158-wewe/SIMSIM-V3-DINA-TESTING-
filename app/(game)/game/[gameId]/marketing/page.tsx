@@ -17,6 +17,11 @@ import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/api/trpc";
 import { useDecisionStore } from "@/lib/stores/decisionStore";
 import { DecisionSubmitBar } from "@/components/game/DecisionSubmitBar";
+import { DecisionImpactPanel } from "@/components/game/DecisionImpactPanel";
+import { WarningBanner } from "@/components/game/WarningBanner";
+import { useMarketingPreview } from "@/lib/hooks/useMarketingPreview";
+import { BRAND_ACTIVITY_MAP } from "@/lib/converters/decisionConverters";
+import { useCrossModuleWarnings } from "@/lib/hooks/useCrossModuleWarnings";
 import { TeamState, Segment } from "@/engine/types";
 import { toast } from "sonner";
 import {
@@ -171,7 +176,9 @@ export default function MarketingPage({ params }: PageProps) {
   const [brandInvestment, setBrandInvestment] = useState(marketing.brandInvestment);
   const [selectedPromotion, setSelectedPromotion] = useState<string | null>(null);
   const [promotionIntensity, setPromotionIntensity] = useState(0);
-  const [purchasedBrandActivities, setPurchasedBrandActivities] = useState<string[]>([]);
+  const [purchasedBrandActivities, setPurchasedBrandActivities] = useState<string[]>(
+    marketing.brandActivities?.length > 0 ? marketing.brandActivities : []
+  );
   const [activePromotions, setActivePromotions] = useState<Array<{ type: string; intensity: number }>>([]);
 
   // Sync store changes to local state (for when decisions are loaded from server)
@@ -195,6 +202,14 @@ export default function MarketingPage({ params }: PageProps) {
     }
   }, [marketing.promotions]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Sync store → local for brand activities
+  useEffect(() => {
+    if (marketing.brandActivities && marketing.brandActivities.length > 0 &&
+        JSON.stringify(marketing.brandActivities) !== JSON.stringify(purchasedBrandActivities)) {
+      setPurchasedBrandActivities(marketing.brandActivities);
+    }
+  }, [marketing.brandActivities]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Sync local state changes to store
   useEffect(() => {
     setMarketingDecisions({ adBudgets });
@@ -208,6 +223,11 @@ export default function MarketingPage({ params }: PageProps) {
   useEffect(() => {
     setMarketingDecisions({ promotions: activePromotions });
   }, [activePromotions, setMarketingDecisions]);
+
+  // Sync brand activities to store
+  useEffect(() => {
+    setMarketingDecisions({ brandActivities: purchasedBrandActivities });
+  }, [purchasedBrandActivities, setMarketingDecisions]);
 
   // Handle brand activity purchase
   const handlePurchaseBrandActivity = (activityId: string) => {
@@ -256,6 +276,12 @@ export default function MarketingPage({ params }: PageProps) {
     }
   }, [teamState?.marketState]);
 
+  // Cross-module warnings
+  const marketingWarnings = useCrossModuleWarnings(state, "marketing");
+
+  // Preview hook for live impact
+  const marketingPreview = useMarketingPreview(state, marketing);
+
   // Compute marketing data from state
   const marketingData = useMemo(() => {
     if (!state) return defaultMarketing;
@@ -281,8 +307,6 @@ export default function MarketingPage({ params }: PageProps) {
       brandAwareness: Math.round(brandAwareness),
       marketShare: totalMarketShare,
       customerSatisfaction,
-      advertisingBudget: 0,
-      currentCampaigns: defaultMarketing.currentCampaigns,
     };
   }, [state]);
 
@@ -318,6 +342,9 @@ export default function MarketingPage({ params }: PageProps) {
         iconColor="text-pink-400"
       />
 
+      {/* Cross-module warnings */}
+      <WarningBanner warnings={marketingWarnings} />
+
       {/* Main Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="bg-slate-800 border-slate-700">
@@ -341,32 +368,39 @@ export default function MarketingPage({ params }: PageProps) {
         {/* Overview Tab */}
         <TabsContent value="overview" className="space-y-6">
           {/* Key Metrics */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <StatCard
-              label="Brand Value"
-              value={`${(marketingData.brandValue * 100).toFixed(0)}%`}
-              icon={<Award className="w-5 h-5" />}
-              variant="pink"
-            />
-            <StatCard
-              label="Brand Awareness"
-              value={`${marketingData.brandAwareness}%`}
-              icon={<Target className="w-5 h-5" />}
-              variant="info"
-            />
-            <StatCard
-              label="Market Share"
-              value={`${(marketingData.marketShare * 100).toFixed(1)}%`}
-              icon={<BarChart3 className="w-5 h-5" />}
-              variant="success"
-            />
-            <StatCard
-              label="Customer Satisfaction"
-              value={`${marketingData.customerSatisfaction}%`}
-              icon={<Star className="w-5 h-5" />}
-              variant="purple"
-            />
-          </div>
+          {(() => {
+            const previewBrand = marketingPreview.previewState?.brandValue;
+            const currentBrand = marketingData.brandValue;
+            const brandChange = previewBrand != null ? previewBrand - currentBrand : 0;
+            return (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <StatCard
+                  label="Brand Value"
+                  value={`${(currentBrand * 100).toFixed(0)}%${brandChange !== 0 ? ` (${brandChange > 0 ? "+" : ""}${(brandChange * 100).toFixed(1)}%)` : ""}`}
+                  icon={<Award className="w-5 h-5" />}
+                  variant="pink"
+                />
+                <StatCard
+                  label="Brand Awareness"
+                  value={`${marketingData.brandAwareness}%`}
+                  icon={<Target className="w-5 h-5" />}
+                  variant="info"
+                />
+                <StatCard
+                  label="Market Share"
+                  value={`${(marketingData.marketShare * 100).toFixed(1)}%`}
+                  icon={<BarChart3 className="w-5 h-5" />}
+                  variant="success"
+                />
+                <StatCard
+                  label="Customer Satisfaction"
+                  value={`${marketingData.customerSatisfaction}%`}
+                  icon={<Star className="w-5 h-5" />}
+                  variant="purple"
+                />
+              </div>
+            );
+          })()}
 
           {/* Marketing Overview */}
           <div className="grid md:grid-cols-2 gap-6">
@@ -431,28 +465,137 @@ export default function MarketingPage({ params }: PageProps) {
             </Card>
           </div>
 
-          {/* Active Campaigns */}
+          {/* Current Round Marketing Decisions */}
           <Card className="bg-slate-800 border-slate-700">
             <CardHeader>
-              <CardTitle className="text-white">Active Campaigns</CardTitle>
+              <CardTitle className="text-white flex items-center gap-2">
+                <Megaphone className="w-5 h-5 text-pink-400" />
+                Current Round Decisions
+              </CardTitle>
+              <CardDescription className="text-slate-400">
+                Summary of all marketing decisions for this round
+              </CardDescription>
             </CardHeader>
-            <CardContent>
-              {marketingData.currentCampaigns.length === 0 ? (
+            <CardContent className="space-y-4">
+              {/* Advertising Section */}
+              {getTotalAdBudget() > 0 && (
+                <div>
+                  <p className="text-slate-400 text-xs uppercase tracking-wider mb-2">Advertising</p>
+                  <div className="space-y-2">
+                    {Object.entries(adBudgets).map(([segment, channels]) => {
+                      const segmentTotal = Object.values(channels).reduce((s, v) => s + v, 0);
+                      if (segmentTotal === 0) return null;
+                      return (
+                        <div key={segment} className="p-3 bg-slate-700/50 rounded-lg">
+                          <div className="flex justify-between items-center mb-1">
+                            <span className="text-white font-medium text-sm">{segment}</span>
+                            <span className="text-pink-400 font-medium text-sm">{formatCurrency(segmentTotal)}</span>
+                          </div>
+                          <div className="flex gap-2 flex-wrap">
+                            {Object.entries(channels).map(([channel, amount]) => {
+                              if (amount === 0) return null;
+                              const channelName = advertisingChannels.find(c => c.id === channel)?.name ?? channel;
+                              return (
+                                <Badge key={channel} className="bg-slate-600/50 text-slate-300 text-xs">
+                                  {channelName}: {formatCurrency(amount)}
+                                </Badge>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Brand Investment Section */}
+              {brandInvestment > 0 && (
+                <div>
+                  <p className="text-slate-400 text-xs uppercase tracking-wider mb-2">Brand Investment</p>
+                  <div className="p-3 bg-pink-900/20 border border-pink-700/30 rounded-lg">
+                    <div className="flex justify-between items-center">
+                      <span className="text-white font-medium text-sm">Direct Brand Investment</span>
+                      <span className="text-pink-400 font-medium">{formatCurrency(brandInvestment)}</span>
+                    </div>
+                    <p className="text-slate-400 text-xs mt-1">
+                      Projected brand increase: +{(brandInvestment / 10_000_000 * 5).toFixed(1)}%
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Brand Activities Section */}
+              {purchasedBrandActivities.length > 0 && (
+                <div>
+                  <p className="text-slate-400 text-xs uppercase tracking-wider mb-2">Brand Activities</p>
+                  <div className="space-y-2">
+                    {purchasedBrandActivities.map(activityId => {
+                      const activity = BRAND_ACTIVITY_MAP[activityId];
+                      if (!activity) return null;
+                      return (
+                        <div key={activityId} className="flex justify-between items-center p-3 bg-green-900/20 border border-green-700/30 rounded-lg">
+                          <div>
+                            <p className="text-white font-medium text-sm">{activity.name}</p>
+                            <p className="text-green-400 text-xs">+{(activity.brandImpact * 100).toFixed(0)}% brand impact</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-emerald-400 font-medium text-sm">{formatCurrency(activity.cost)}</span>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              className="h-6 px-2 text-xs"
+                              onClick={() => setPurchasedBrandActivities(prev => prev.filter(id => id !== activityId))}
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Promotions Section */}
+              {activePromotions.length > 0 && (
+                <div>
+                  <p className="text-slate-400 text-xs uppercase tracking-wider mb-2">Promotions</p>
+                  <div className="space-y-2">
+                    {activePromotions.map((promo, idx) => (
+                      <div key={idx} className="flex justify-between items-center p-3 bg-slate-700/50 rounded-lg">
+                        <span className="text-white text-sm">{promo.type}</span>
+                        <Badge className="bg-pink-500/20 text-pink-400 text-xs">{promo.intensity}% intensity</Badge>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Empty state */}
+              {getTotalAdBudget() === 0 && brandInvestment === 0 && purchasedBrandActivities.length === 0 && activePromotions.length === 0 && (
                 <div className="text-center py-8 text-slate-400">
                   <Megaphone className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                  <p>No active campaigns</p>
-                  <p className="text-sm">Create advertising campaigns in the Advertising tab</p>
+                  <p>No marketing decisions set</p>
+                  <p className="text-sm mt-1">
+                    Use the <button className="text-pink-400 underline" onClick={() => setActiveTab("advertising")}>Advertising</button> or{" "}
+                    <button className="text-pink-400 underline" onClick={() => setActiveTab("brand")}>Brand</button> tabs to allocate budgets
+                  </p>
                 </div>
-              ) : (
-                <div className="space-y-3">
-                  {marketingData.currentCampaigns.map((campaign) => (
-                    <div key={campaign.id} className="p-3 bg-slate-700/50 rounded-lg">
-                      <div className="flex justify-between items-center">
-                        <span className="text-white font-medium">{campaign.name}</span>
-                        <Badge className="bg-green-600">{campaign.status}</Badge>
-                      </div>
-                    </div>
-                  ))}
+              )}
+
+              {/* Total Cost Summary */}
+              {(getTotalAdBudget() > 0 || brandInvestment > 0 || purchasedBrandActivities.length > 0) && (
+                <div className="pt-3 border-t border-slate-700">
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-400 text-sm font-medium">Total Marketing Cost</span>
+                    <span className="text-pink-400 font-bold text-lg">
+                      {formatCurrency(
+                        getTotalAdBudget() + brandInvestment +
+                        purchasedBrandActivities.reduce((sum, id) => sum + (BRAND_ACTIVITY_MAP[id]?.cost ?? 0), 0)
+                      )}
+                    </span>
+                  </div>
                 </div>
               )}
             </CardContent>
@@ -744,8 +887,37 @@ export default function MarketingPage({ params }: PageProps) {
                 </div>
               </div>
               {purchasedBrandActivities.length > 0 && (
-                <div className="mt-4 p-3 bg-green-900/20 border border-green-700 rounded-lg">
-                  <p className="text-green-400 text-sm font-medium">Pending Brand Activities: {purchasedBrandActivities.length}</p>
+                <div className="mt-4 p-4 bg-green-900/20 border border-green-700 rounded-lg space-y-2">
+                  <p className="text-green-400 text-sm font-medium mb-2">Pending Brand Activities</p>
+                  {purchasedBrandActivities.map(activityId => {
+                    const activity = BRAND_ACTIVITY_MAP[activityId];
+                    if (!activity) return null;
+                    return (
+                      <div key={activityId} className="flex justify-between items-center p-2 bg-green-900/30 rounded">
+                        <div>
+                          <span className="text-white text-sm font-medium">{activity.name}</span>
+                          <span className="text-green-400 text-xs ml-2">+{(activity.brandImpact * 100).toFixed(0)}% brand</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-emerald-400 text-sm">{formatCurrency(activity.cost)}</span>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            className="h-6 px-2 text-xs"
+                            onClick={() => setPurchasedBrandActivities(prev => prev.filter(id => id !== activityId))}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div className="flex justify-between items-center pt-2 border-t border-green-700/50">
+                    <span className="text-slate-400 text-sm">Total Activities Cost</span>
+                    <span className="text-emerald-400 font-bold">
+                      {formatCurrency(purchasedBrandActivities.reduce((sum, id) => sum + (BRAND_ACTIVITY_MAP[id]?.cost ?? 0), 0))}
+                    </span>
+                  </div>
                 </div>
               )}
             </CardContent>
@@ -935,6 +1107,14 @@ export default function MarketingPage({ params }: PageProps) {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Decision Impact Preview */}
+      <DecisionImpactPanel
+        moduleName="Marketing"
+        costs={marketingPreview.costs}
+        messages={marketingPreview.messages}
+        cashRemaining={state ? state.cash - marketingPreview.costs : undefined}
+      />
 
       {/* Decision Submit Bar */}
       <DecisionSubmitBar module="MARKETING" getDecisions={getDecisions} />

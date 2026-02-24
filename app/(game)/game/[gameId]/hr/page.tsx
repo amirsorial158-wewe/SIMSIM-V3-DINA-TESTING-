@@ -19,6 +19,12 @@ import { Slider } from "@/components/ui/slider";
 import { trpc } from "@/lib/api/trpc";
 import { useDecisionStore } from "@/lib/stores/decisionStore";
 import { DecisionSubmitBar } from "@/components/game/DecisionSubmitBar";
+import { DecisionImpactPanel } from "@/components/game/DecisionImpactPanel";
+import { WarningBanner } from "@/components/game/WarningBanner";
+import { useHRPreview } from "@/lib/hooks/useHRPreview";
+import { useCrossModuleWarnings } from "@/lib/hooks/useCrossModuleWarnings";
+import { HiringRequirementsPanel } from "@/components/hr/HiringRequirementsPanel";
+import { calculateHiringRequirements } from "@/lib/hooks/calculateHiringRequirements";
 import { useFeatureFlag } from "@/lib/contexts/ComplexityContext";
 import { toast } from "sonner";
 import {
@@ -44,7 +50,9 @@ import {
   Brain,
   Coffee,
 } from "lucide-react";
-import type { TeamState, Employee, BenefitsPackage, CompanyBenefits } from "@/engine/types";
+import type { TeamState, Employee, EmployeeRole, BenefitsPackage, CompanyBenefits } from "@/engine/types";
+import { HRModule } from "@/engine/modules/HRModule";
+import { createEngineContext } from "@/engine/core/EngineContext";
 
 interface PageProps {
   params: Promise<{ gameId: string }>;
@@ -55,49 +63,23 @@ interface Candidate {
   type: "worker" | "engineer" | "supervisor";
   name: string;
   requestedSalary: number;
-  stats: {
-    efficiency: number;
-    accuracy: number;
-    speed: number;
-    stamina: number;
-    discipline: number;
-    loyalty: number;
-    teamCompatibility: number;
-    health: number;
-  };
+  stats: Record<string, number>;
+  searchId: string;
 }
 
-// Sample candidates - in production these would come from a recruitment search API
-const sampleCandidates: Candidate[] = [
-  {
-    id: "c1",
-    type: "worker",
-    name: "John Smith",
-    requestedSalary: 45000,
-    stats: { efficiency: 72, accuracy: 68, speed: 75, stamina: 80, discipline: 70, loyalty: 65, teamCompatibility: 78, health: 85 },
-  },
-  {
-    id: "c2",
-    type: "worker",
-    name: "Maria Garcia",
-    requestedSalary: 48000,
-    stats: { efficiency: 78, accuracy: 82, speed: 70, stamina: 75, discipline: 85, loyalty: 72, teamCompatibility: 88, health: 90 },
-  },
-  {
-    id: "c3",
-    type: "engineer",
-    name: "David Chen",
-    requestedSalary: 95000,
-    stats: { efficiency: 85, accuracy: 90, speed: 72, stamina: 70, discipline: 88, loyalty: 78, teamCompatibility: 80, health: 85 },
-  },
-];
+interface RecruitmentSearch {
+  id: string;
+  role: string;
+  tier: string;
+  candidates: Candidate[];
+}
 
 const recruitmentTiers = [
   {
     id: "basic",
     name: "Basic Recruitment",
     cost: 5000,
-    candidates: 3,
+    candidates: 4,
     qualityRange: "50-75",
     description: "Standard job posting",
   },
@@ -105,7 +87,7 @@ const recruitmentTiers = [
     id: "premium",
     name: "Premium Recruitment",
     cost: 15000,
-    candidates: 5,
+    candidates: 6,
     qualityRange: "60-85",
     description: "Professional headhunting",
   },
@@ -113,7 +95,7 @@ const recruitmentTiers = [
     id: "executive",
     name: "Executive Search",
     cost: 50000,
-    candidates: 7,
+    candidates: 8,
     qualityRange: "70-95",
     description: "Top-tier executive search",
   },
@@ -183,6 +165,9 @@ export default function HRPage({ params }: PageProps) {
   const [selectedCandidates, setSelectedCandidates] = useState<string[]>([]);
   const [recruitmentSearches, setRecruitmentSearches] = useState<Array<{ role: string; tier: string }>>([]);
   const [enrolledTraining, setEnrolledTraining] = useState<Array<{ role: string; programType: string }>>([]);
+  const [completedSearches, setCompletedSearches] = useState<RecruitmentSearch[]>([]);
+  const [activeSearchId, setActiveSearchId] = useState<string | null>(null);
+  const searchCounterRef = useRef(0);
 
   // Feature flags for complexity-based UI
   const hasBenefitsSystem = useFeatureFlag("benefitsSystem");
@@ -251,17 +236,23 @@ export default function HRPage({ params }: PageProps) {
     setHRDecisions({ salaryAdjustment });
   }, [salaryAdjustment, setHRDecisions]);
 
-  // Sync selected candidates to store as hires
+  // Sync selected candidates to store as hires (including full candidate data)
   useEffect(() => {
+    const allCandidates = completedSearches.flatMap(s => s.candidates);
     const hires = selectedCandidates.map(candidateId => {
-      const candidate = sampleCandidates.find(c => c.id === candidateId);
+      const candidate = allCandidates.find(c => c.id === candidateId);
       return {
         role: candidate?.type || 'worker',
         candidateId,
+        candidateData: candidate ? {
+          name: candidate.name,
+          stats: candidate.stats,
+          salary: candidate.requestedSalary,
+        } : undefined,
       };
     });
     setHRDecisions({ hires });
-  }, [selectedCandidates, setHRDecisions]);
+  }, [selectedCandidates, completedSearches, setHRDecisions]);
 
   // Sync recruitment searches to store
   useEffect(() => {
@@ -306,6 +297,18 @@ export default function HRPage({ params }: PageProps) {
     }
   }, [teamState?.state]);
 
+  // Cross-module warnings
+  const warnings = useCrossModuleWarnings(state, "hr");
+
+  // Hiring requirements
+  const hiringRequirements = useMemo(() => {
+    if (!state) return [];
+    return calculateHiringRequirements(state);
+  }, [state]);
+
+  // Preview hook for live impact
+  const hrPreview = useHRPreview(state, hr);
+
   // Compute workforce breakdown from employees
   const workforceBreakdown = useMemo(() => {
     if (!state?.employees) {
@@ -326,17 +329,21 @@ export default function HRPage({ params }: PageProps) {
     return "text-red-400";
   };
 
-  const calculateEmployeeValue = (stats: Candidate["stats"]) => {
-    return Math.round(
-      stats.efficiency * 0.25 +
-      stats.accuracy * 0.15 +
-      stats.speed * 0.15 +
-      stats.stamina * 0.10 +
-      stats.discipline * 0.10 +
-      stats.loyalty * 0.10 +
-      stats.teamCompatibility * 0.10 +
-      stats.health * 0.05
-    );
+  const calculateEmployeeValue = (stats: Record<string, number>) => {
+    const weights: Record<string, number> = {
+      efficiency: 0.25, accuracy: 0.15, speed: 0.15, stamina: 0.10,
+      discipline: 0.10, loyalty: 0.10, teamCompatibility: 0.10, health: 0.05,
+    };
+    let score = 0;
+    for (const [key, weight] of Object.entries(weights)) {
+      score += (stats[key] ?? 0) * weight;
+    }
+    // Bonus for role-specific stats
+    if (stats.innovation != null) score += stats.innovation * 0.05;
+    if (stats.problemSolving != null) score += stats.problemSolving * 0.05;
+    if (stats.leadership != null) score += stats.leadership * 0.05;
+    if (stats.tacticalPlanning != null) score += stats.tacticalPlanning * 0.05;
+    return Math.round(score);
   };
 
   return (
@@ -348,6 +355,12 @@ export default function HRPage({ params }: PageProps) {
         icon={<Users className="w-7 h-7" />}
         iconColor="text-blue-400"
       />
+
+      {/* Cross-module warnings */}
+      <WarningBanner warnings={warnings} />
+
+      {/* Hiring requirements panel */}
+      <HiringRequirementsPanel requirements={hiringRequirements} />
 
       {/* Main Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -566,17 +579,17 @@ export default function HRPage({ params }: PageProps) {
             <CardHeader>
               <CardTitle className="text-white flex items-center gap-2">
                 <UserPlus className="w-5 h-5" />
-                Start Recruitment Campaign
+                Recruitment Campaign
                 <HelpTooltip text="Higher tiers cost more but find better candidates. Workers run machines (~2.5 per machine), Engineers boost R&D, Supervisors improve team efficiency." />
               </CardTitle>
               <CardDescription className="text-slate-400">
-                Select a recruitment tier and position type to find candidates
+                Select a position type, then a recruitment level to find candidates
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              {/* Position Type Selection */}
+              {/* Step 1: Position Type */}
               <div>
-                <label className="text-slate-300 text-sm mb-2 block">Position Type</label>
+                <label className="text-slate-300 text-sm mb-2 block font-medium">Step 1 — Position Type</label>
                 <div className="flex gap-2 flex-wrap">
                   {["worker", "engineer", "supervisor"].map((type) => (
                     <Button
@@ -586,7 +599,11 @@ export default function HRPage({ params }: PageProps) {
                         ? "bg-blue-600 hover:bg-blue-700"
                         : "border-slate-500"
                       }
-                      onClick={() => setSelectedPositionType(type)}
+                      onClick={() => {
+                        setSelectedPositionType(type);
+                        setSelectedRecruitmentTier(null);
+                        setActiveSearchId(null);
+                      }}
                     >
                       {type.charAt(0).toUpperCase() + type.slice(1)}
                     </Button>
@@ -594,151 +611,259 @@ export default function HRPage({ params }: PageProps) {
                 </div>
               </div>
 
-              {/* Recruitment Tiers */}
-              <div className="grid md:grid-cols-3 gap-4">
-                {recruitmentTiers.map((tier) => (
-                  <Card
-                    key={tier.id}
-                    className={`bg-slate-700 border-slate-600 cursor-pointer transition-all ${
-                      selectedRecruitmentTier === tier.id ? 'border-blue-500 ring-2 ring-blue-500/20' : 'hover:border-slate-500'
-                    }`}
-                    onClick={() => setSelectedRecruitmentTier(tier.id)}
-                  >
-                    <CardContent className="p-4">
-                      <h3 className="text-white font-medium mb-2">{tier.name}</h3>
-                      <p className="text-slate-400 text-sm mb-3">{tier.description}</p>
-                      <div className="space-y-1 text-sm">
-                        <div className="flex justify-between">
-                          <span className="text-slate-400">Cost</span>
-                          <span className="text-white">{formatCurrency(tier.cost)}</span>
+              {/* Step 2: Recruitment Level */}
+              <div>
+                <label className="text-slate-300 text-sm mb-2 block font-medium">Step 2 — Recruitment Level</label>
+                <div className="grid md:grid-cols-3 gap-4">
+                  {recruitmentTiers.map((tier) => (
+                    <Card
+                      key={tier.id}
+                      className={`bg-slate-700 border-slate-600 cursor-pointer transition-all ${
+                        selectedRecruitmentTier === tier.id ? 'border-blue-500 ring-2 ring-blue-500/20' : 'hover:border-slate-500'
+                      }`}
+                      onClick={() => {
+                        setSelectedRecruitmentTier(tier.id);
+                        setActiveSearchId(null);
+                      }}
+                    >
+                      <CardContent className="p-4">
+                        <h3 className="text-white font-medium mb-2">{tier.name}</h3>
+                        <p className="text-slate-400 text-sm mb-3">{tier.description}</p>
+                        <div className="space-y-1 text-sm">
+                          <div className="flex justify-between">
+                            <span className="text-slate-400">Cost</span>
+                            <span className="text-white">{formatCurrency(tier.cost)}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-400">Candidates</span>
+                            <span className="text-white">{tier.candidates}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-400">Quality Range</span>
+                            <span className="text-green-400">{tier.qualityRange}</span>
+                          </div>
                         </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-400">Candidates</span>
-                          <span className="text-white">{tier.candidates}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-400">Quality Range</span>
-                          <span className="text-green-400">{tier.qualityRange}</span>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
               </div>
 
+              {/* Step 3: Search button */}
               <div className="flex justify-end">
                 <Button
                   className="bg-blue-600 hover:bg-blue-700"
                   disabled={!selectedRecruitmentTier}
                   onClick={() => {
                     if (selectedRecruitmentTier) {
+                      const searchId = `search-${searchCounterRef.current++}`;
+                      const role = selectedPositionType as EmployeeRole;
+                      const tier = selectedRecruitmentTier as "basic" | "premium" | "executive";
+                      const round = state?.round ?? 1;
+
+                      const ctx = createEngineContext(
+                        `recruit-${round}-${searchId}`,
+                        round,
+                        "preview"
+                      );
+
+                      const tierConfig = recruitmentTiers.find(t => t.id === tier);
+                      const generated = HRModule.generateCandidates(role, tier, tierConfig?.candidates, ctx);
+
+                      const candidates: Candidate[] = generated.map((emp, idx) => ({
+                        id: `${searchId}-c${idx}`,
+                        type: role,
+                        name: emp.name,
+                        requestedSalary: emp.salary,
+                        stats: emp.stats as unknown as Record<string, number>,
+                        searchId,
+                      }));
+
+                      setCompletedSearches(prev => [...prev, {
+                        id: searchId,
+                        role: selectedPositionType,
+                        tier: selectedRecruitmentTier,
+                        candidates,
+                      }]);
+
                       setRecruitmentSearches(prev => [
                         ...prev,
                         { role: selectedPositionType, tier: selectedRecruitmentTier }
                       ]);
-                      setSelectedRecruitmentTier(null);
+
+                      setActiveSearchId(searchId);
                     }
                   }}
                 >
-                  Start Recruitment ({formatCurrency(
+                  Search Candidates ({formatCurrency(
                     recruitmentTiers.find(t => t.id === selectedRecruitmentTier)?.cost || 0
                   )})
                 </Button>
               </div>
-              {recruitmentSearches.length > 0 && (
-                <div className="mt-4 p-3 bg-green-900/20 border border-green-700 rounded-lg">
-                  <p className="text-green-400 text-sm font-medium mb-2">Pending Recruitment Campaigns:</p>
-                  <div className="space-y-1">
-                    {recruitmentSearches.map((search, idx) => (
-                      <div key={idx} className="flex justify-between items-center text-sm">
-                        <span className="text-slate-300 capitalize">{search.role} - {search.tier}</span>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="text-red-400 h-6 px-2"
-                          onClick={() => setRecruitmentSearches(prev => prev.filter((_, i) => i !== idx))}
-                        >
-                          Cancel
-                        </Button>
-                      </div>
-                    ))}
+
+              {/* Step 4: Candidates for the active search */}
+              {(() => {
+                const activeSearch = completedSearches.find(s => s.id === activeSearchId);
+                if (!activeSearch) return null;
+
+                const tierInfo = recruitmentTiers.find(t => t.id === activeSearch.tier);
+                return (
+                  <div className="border-t border-slate-700 pt-6">
+                    <div className="flex items-center gap-2 mb-4">
+                      <h4 className="text-white text-sm font-medium capitalize">
+                        {activeSearch.role} Candidates — {tierInfo?.name ?? activeSearch.tier}
+                      </h4>
+                      <Badge className={
+                        activeSearch.tier === "executive" ? "bg-amber-500/20 text-amber-400" :
+                        activeSearch.tier === "premium" ? "bg-purple-500/20 text-purple-400" :
+                        "bg-slate-500/20 text-slate-400"
+                      }>
+                        {tierInfo?.qualityRange ?? activeSearch.tier}
+                      </Badge>
+                      <span className="text-slate-500 text-xs">{activeSearch.candidates.length} found</span>
+                    </div>
+                    <div className="space-y-3">
+                      {activeSearch.candidates.map((candidate) => {
+                        const statEntries = Object.entries(candidate.stats);
+                        const cols = statEntries.length > 8 ? 5 : 4;
+                        return (
+                          <Card
+                            key={candidate.id}
+                            className={`bg-slate-700 border-slate-600 transition-all ${
+                              selectedCandidates.includes(candidate.id) ? 'border-green-500 ring-1 ring-green-500/20' : ''
+                            }`}
+                          >
+                            <CardContent className="p-4">
+                              <div className="flex items-start justify-between">
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <h3 className="text-white font-medium">{candidate.name}</h3>
+                                    <Badge className="bg-slate-600">
+                                      {candidate.type.charAt(0).toUpperCase() + candidate.type.slice(1)}
+                                    </Badge>
+                                  </div>
+                                  <div className="grid gap-3 text-sm" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
+                                    {statEntries.map(([key, value]) => (
+                                      <div key={key}>
+                                        <span className="text-slate-400 text-xs block">
+                                          {key.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase())}
+                                        </span>
+                                        <span className={`font-medium ${getStatColor(value)}`}>
+                                          {Math.round(value)}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                                <div className="text-right ml-4 shrink-0">
+                                  <div className="text-slate-400 text-sm mb-1">Salary Request</div>
+                                  <div className="text-white font-medium mb-2">
+                                    {formatCurrency(candidate.requestedSalary)}/year
+                                  </div>
+                                  <div className="text-slate-400 text-xs mb-2">
+                                    Value Score: <span className="text-green-400">{calculateEmployeeValue(candidate.stats)}</span>
+                                  </div>
+                                  <Button
+                                    size="sm"
+                                    className={selectedCandidates.includes(candidate.id)
+                                      ? "bg-green-600 hover:bg-green-700"
+                                      : "bg-blue-600 hover:bg-blue-700"
+                                    }
+                                    onClick={() => {
+                                      if (selectedCandidates.includes(candidate.id)) {
+                                        setSelectedCandidates(prev => prev.filter(id => id !== candidate.id));
+                                      } else {
+                                        setSelectedCandidates(prev => [...prev, candidate.id]);
+                                      }
+                                    }}
+                                  >
+                                    {selectedCandidates.includes(candidate.id) ? "Selected" : "Hire"}
+                                  </Button>
+                                </div>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
             </CardContent>
           </Card>
 
-          {/* Available Candidates */}
-          <Card className="bg-slate-800 border-slate-700">
-            <CardHeader>
-              <CardTitle className="text-white">Available Candidates</CardTitle>
-              <CardDescription className="text-slate-400">
-                Review and hire candidates from your recruitment campaigns
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {sampleCandidates.map((candidate) => (
-                  <Card
-                    key={candidate.id}
-                    className={`bg-slate-700 border-slate-600 ${
-                      selectedCandidates.includes(candidate.id) ? 'border-green-500' : ''
-                    }`}
-                  >
-                    <CardContent className="p-4">
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <div className="flex items-center gap-2 mb-2">
-                            <h3 className="text-white font-medium">{candidate.name}</h3>
-                            <Badge className="bg-slate-600">
-                              {candidate.type.charAt(0).toUpperCase() + candidate.type.slice(1)}
-                            </Badge>
+          {/* Pending Hires Summary */}
+          {selectedCandidates.length > 0 && (
+            <Card className="bg-green-900/20 border-green-700">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-green-400 text-base flex items-center gap-2">
+                  <CheckCircle2 className="w-5 h-5" />
+                  Pending Hires ({selectedCandidates.length})
+                </CardTitle>
+                <CardDescription className="text-slate-400">
+                  These candidates will be hired when you save your decisions
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {selectedCandidates.map(candidateId => {
+                    const allCandidates = completedSearches.flatMap(s => s.candidates);
+                    const candidate = allCandidates.find(c => c.id === candidateId);
+                    if (!candidate) return null;
+                    const hiringCost = candidate.requestedSalary * 0.15;
+                    return (
+                      <div key={candidateId} className="flex items-center justify-between p-3 bg-slate-800/50 rounded-lg">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                            candidate.type === 'worker' ? 'bg-blue-600/20' :
+                            candidate.type === 'engineer' ? 'bg-purple-600/20' : 'bg-green-600/20'
+                          }`}>
+                            {candidate.type === 'worker' ? (
+                              <Briefcase className="w-4 h-4 text-blue-400" />
+                            ) : candidate.type === 'engineer' ? (
+                              <Brain className="w-4 h-4 text-purple-400" />
+                            ) : (
+                              <Award className="w-4 h-4 text-green-400" />
+                            )}
                           </div>
-                          <div className="grid grid-cols-4 gap-4 text-sm">
-                            {Object.entries(candidate.stats).slice(0, 4).map(([key, value]) => (
-                              <div key={key}>
-                                <span className="text-slate-400 text-xs block">
-                                  {key.charAt(0).toUpperCase() + key.slice(1)}
-                                </span>
-                                <span className={`font-medium ${getStatColor(value)}`}>
-                                  {value}
-                                </span>
-                              </div>
-                            ))}
+                          <div>
+                            <p className="text-white text-sm font-medium">{candidate.name}</p>
+                            <p className="text-slate-400 text-xs capitalize">{candidate.type} · Value: {calculateEmployeeValue(candidate.stats)}</p>
                           </div>
                         </div>
-                        <div className="text-right">
-                          <div className="text-slate-400 text-sm mb-1">Salary Request</div>
-                          <div className="text-white font-medium mb-2">
-                            {formatCurrency(candidate.requestedSalary)}/year
-                          </div>
-                          <div className="text-slate-400 text-xs mb-2">
-                            Value Score: <span className="text-green-400">{calculateEmployeeValue(candidate.stats)}</span>
+                        <div className="flex items-center gap-4">
+                          <div className="text-right">
+                            <p className="text-white text-sm">{formatCurrency(candidate.requestedSalary)}/yr</p>
+                            <p className="text-slate-400 text-xs">Hiring cost: {formatCurrency(hiringCost)}</p>
                           </div>
                           <Button
                             size="sm"
-                            className={selectedCandidates.includes(candidate.id)
-                              ? "bg-green-600 hover:bg-green-700"
-                              : "bg-blue-600 hover:bg-blue-700"
-                            }
-                            onClick={() => {
-                              if (selectedCandidates.includes(candidate.id)) {
-                                setSelectedCandidates(prev => prev.filter(id => id !== candidate.id));
-                              } else {
-                                setSelectedCandidates(prev => [...prev, candidate.id]);
-                              }
-                            }}
+                            variant="ghost"
+                            className="text-red-400 hover:text-red-300 h-8 px-2"
+                            onClick={() => setSelectedCandidates(prev => prev.filter(id => id !== candidateId))}
                           >
-                            {selectedCandidates.includes(candidate.id) ? "Selected" : "Hire"}
+                            Remove
                           </Button>
                         </div>
                       </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+                    );
+                  })}
+                </div>
+                <div className="mt-3 pt-3 border-t border-green-700/50 flex justify-between text-sm">
+                  <span className="text-slate-400">Total hiring costs</span>
+                  <span className="text-green-400 font-medium">
+                    {formatCurrency(
+                      selectedCandidates.reduce((total, id) => {
+                        const allCandidates = completedSearches.flatMap(s => s.candidates);
+                        const candidate = allCandidates.find(c => c.id === id);
+                        return total + (candidate ? candidate.requestedSalary * 0.15 : 0);
+                      }, 0)
+                    )}
+                  </span>
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
 
         {/* Training Tab */}
@@ -1363,6 +1488,14 @@ export default function HRPage({ params }: PageProps) {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Decision Impact Preview */}
+      <DecisionImpactPanel
+        moduleName="HR"
+        costs={hrPreview.costs}
+        messages={hrPreview.messages}
+        cashRemaining={state ? state.cash - hrPreview.costs : undefined}
+      />
 
       {/* Decision Submit Bar */}
       <DecisionSubmitBar module="HR" getDecisions={getDecisions} />

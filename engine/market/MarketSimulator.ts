@@ -19,6 +19,7 @@ import type { CompetitionState, CrowdingState, FirstMoverBonus, BrandErosion, Ar
 import { calculateCrowdingFactor, FIRST_MOVER_MAX_BONUS, FIRST_MOVER_DECAY_ROUNDS, BRAND_EROSION_SENSITIVITY, ARMS_RACE_BONUS, initializeCompetitionState } from "../types/competition";
 import { SEGMENT_FEATURE_PREFERENCES, TECH_FAMILIES, calculateFeatureMatchScore } from "../types/features";
 import type { ProductFeatureSet } from "../types/features";
+import { getDemandMultiplier } from "@/lib/config/demandCycles";
 
 /** EMA smoothing factor for dynamic pricing. */
 const DYNAMIC_PRICE_EMA_ALPHA = 0.3;
@@ -458,10 +459,13 @@ export class MarketSimulator {
       // Apply growth rate
       const growthMultiplier = 1 + baseData.growthRate;
 
+      // Dynamic demand cycle multiplier (seasonal/event-based)
+      const cycleMultiplier = getDemandMultiplier(segment, marketState.roundNumber);
+
       // Random noise (±5%) - deterministic with context
       const noise = 0.95 + getRandomValue(ctx) * 0.1;
 
-      adjustedDemand *= gdpMultiplier * confidenceMultiplier * inflationMultiplier * growthMultiplier * noise;
+      adjustedDemand *= gdpMultiplier * confidenceMultiplier * inflationMultiplier * growthMultiplier * cycleMultiplier * noise;
 
       demand[segment] = Math.floor(adjustedDemand);
     }
@@ -572,9 +576,17 @@ export class MarketSimulator {
     const qualityRatio = product.quality / qualityExpectation;
     // Beyond 1.0, use sqrt for diminishing returns: sqrt(1.2) = 1.095, sqrt(1.5) = 1.22
     // v4.0.2: Cap limits R&D-focused dominance
-    const qualityMultiplier = qualityRatio <= 1.0
-      ? qualityRatio
-      : 1.0 + Math.sqrt(qualityRatio - 1) * 0.5; // 50% of excess via sqrt
+    // v5.0.0: Soft quality curve — quadratic penalty below 70% of expectation
+    let qualityMultiplier: number;
+    if (qualityRatio >= 1.0) {
+      qualityMultiplier = 1.0 + Math.sqrt(qualityRatio - 1) * 0.5; // 50% of excess via sqrt
+    } else if (qualityRatio >= 0.7) {
+      qualityMultiplier = qualityRatio; // Linear zone
+    } else {
+      // Accelerating penalty: quadratic below 70% of expectation
+      // Continuity at 0.7: 0.7² / 0.49 = 0.7
+      qualityMultiplier = (qualityRatio * qualityRatio) / 0.49;
+    }
     const qualityScore = Math.min(CONSTANTS.QUALITY_FEATURE_BONUS_CAP, qualityMultiplier) * weights.quality;
 
     // Brand Score: Brand value contribution (already 0-1)
@@ -615,6 +627,12 @@ export class MarketSimulator {
 
     // Total score (theoretical max = 100 with all weights summing to 100)
     let totalScore = priceScore + qualityScore + brandScore + esgScore + featureScore;
+
+    // Quality grade bonus: premium/artisan products get a score boost
+    const gradeMultiplier = product.qualityGrade === "artisan" ? 1.08
+      : product.qualityGrade === "premium" ? 1.04
+      : 1.0;
+    totalScore *= gradeMultiplier;
 
     // PATCH 5: Quality market share bonus
     const qualityMarketShareBonus = product.quality * CONSTANTS.QUALITY_MARKET_SHARE_BONUS;
@@ -982,6 +1000,52 @@ export class MarketSimulator {
       epsRank: byEPS.findIndex(t => t.id === team.id) + 1,
       shareRank: byShare.findIndex(t => t.id === team.id) + 1,
     }));
+  }
+
+  /**
+   * Update customer loyalty for a team based on sales performance.
+   * Consistent supply builds loyalty; stockouts erode it.
+   * Loyalty provides a small pricing premium and insulation against competitor price drops.
+   *
+   * @param currentLoyalty Current loyalty values (0-100 per segment)
+   * @param salesBySegment Units sold this round per segment
+   * @param demandBySegment Total demand per segment
+   * @returns Updated loyalty values
+   */
+  static updateCustomerLoyalty(
+    currentLoyalty: Record<Segment, number> | undefined,
+    salesBySegment: Record<Segment, number>,
+    demandBySegment: Record<Segment, number>
+  ): Record<Segment, number> {
+    const loyalty: Record<Segment, number> = currentLoyalty
+      ? { ...currentLoyalty }
+      : { "Budget": 50, "General": 50, "Enthusiast": 50, "Professional": 50, "Active Lifestyle": 50 };
+
+    for (const segment of CONSTANTS.SEGMENTS) {
+      const sold = salesBySegment[segment] ?? 0;
+      const demand = demandBySegment[segment] ?? 1;
+      const fulfillmentRate = Math.min(1.0, sold / Math.max(1, demand * 0.1)); // team's share of demand
+
+      if (sold > 0) {
+        // Building loyalty: +2 per round with sales, up to +5 for strong fulfillment
+        const loyaltyGain = 2 + fulfillmentRate * 3;
+        loyalty[segment] = Math.min(100, loyalty[segment] + loyaltyGain);
+      } else {
+        // Stockout / no product: loyalty decays -5 per round
+        loyalty[segment] = Math.max(0, loyalty[segment] - 5);
+      }
+    }
+
+    return loyalty;
+  }
+
+  /**
+   * Get loyalty score bonus for market scoring.
+   * High loyalty provides a small total score multiplier.
+   */
+  static getLoyaltyBonus(loyalty: number): number {
+    // 0-100 loyalty → 0% to 5% score bonus
+    return (loyalty / 100) * 0.05;
   }
 
   /**

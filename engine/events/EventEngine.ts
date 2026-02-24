@@ -497,6 +497,345 @@ const EVENT_TEMPLATES: GameEvent[] = [
 ];
 
 // ============================================
+// SUPPLY CHAIN EVENT TEMPLATES
+// (Converted from data/supplyChainEvents.ts for engine integration)
+// ============================================
+
+const SUPPLY_CHAIN_EVENT_TEMPLATES: GameEvent[] = [
+  {
+    id: "sc_port_congestion",
+    type: "crisis",
+    title: "Port Congestion",
+    description: "Major shipping delays at Asian ports cause component shortages. Production output reduced for 2 rounds.",
+    triggerConditions: [{ type: "round", operator: ">=", value: 3 }],
+    baseProbability: 0.08,
+    duration: 2,
+    severity: "moderate",
+    effects: [
+      { type: "capacity_modifier", value: 0.85, duration: 2 },
+      { type: "cost_modifier", value: 1.05 },
+    ],
+    icon: "ship",
+  },
+  {
+    id: "sc_chip_shortage",
+    type: "crisis",
+    title: "Semiconductor Shortage",
+    description: "Global chip shortage drives processor costs up 40%. Premium segments hit hardest.",
+    triggerConditions: [{ type: "round", operator: ">=", value: 5 }],
+    baseProbability: 0.06,
+    duration: 3,
+    severity: "major",
+    effects: [
+      { type: "cost_modifier", value: 1.4, duration: 3 },
+    ],
+    playerChoices: [
+      {
+        id: "stockpile",
+        label: "Emergency Stockpile",
+        description: "Buy chips at premium prices to maintain production",
+        cost: 8_000_000,
+        effects: [{ type: "cost_modifier", value: 1.15, duration: 2 }],
+      },
+      {
+        id: "redesign",
+        label: "Redesign with Alternatives",
+        description: "Use alternative chips — slower but cheaper long-term",
+        cost: 3_000_000,
+        effects: [
+          { type: "capacity_modifier", value: 0.8, duration: 2 },
+          { type: "quality_modifier", value: -3, target: "all", duration: 2 },
+        ],
+      },
+    ],
+    icon: "cpu",
+  },
+  {
+    id: "sc_display_defect",
+    type: "crisis",
+    title: "Display Panel Quality Issue",
+    description: "A batch of display panels from your supplier has quality defects. Defect rate increases until resolved.",
+    triggerConditions: [{ type: "round", operator: ">=", value: 2 }],
+    baseProbability: 0.10,
+    duration: 2,
+    severity: "moderate",
+    effects: [
+      { type: "quality_modifier", value: -8, target: "all", duration: 2 },
+    ],
+    playerChoices: [
+      {
+        id: "switch_supplier",
+        label: "Switch Supplier",
+        description: "Find a new supplier — costs money but fixes quality",
+        cost: 4_000_000,
+        effects: [{ type: "quality_modifier", value: 2, target: "all", duration: 3 }],
+      },
+      {
+        id: "extra_qa",
+        label: "Extra QA Testing",
+        description: "Add inspection step — slows production but catches defects",
+        cost: 1_500_000,
+        effects: [{ type: "capacity_modifier", value: 0.9, duration: 2 }],
+      },
+    ],
+    icon: "monitor-x",
+  },
+  {
+    id: "sc_rare_earth_spike",
+    type: "crisis",
+    title: "Rare Earth Price Spike",
+    description: "Export restrictions on rare earth minerals drive battery and display costs up 25%.",
+    triggerConditions: [{ type: "round", operator: ">=", value: 4 }],
+    baseProbability: 0.07,
+    duration: 2,
+    severity: "moderate",
+    effects: [
+      { type: "cost_modifier", value: 1.25, duration: 2 },
+    ],
+    icon: "gem",
+  },
+  {
+    id: "sc_supplier_improvement",
+    type: "opportunity",
+    title: "Supplier Quality Improvement",
+    description: "Your primary supplier invests in new equipment. Material quality improves, reducing defect rates.",
+    triggerConditions: [{ type: "round", operator: ">=", value: 6 }],
+    baseProbability: 0.05,
+    duration: 3,
+    effects: [
+      { type: "quality_modifier", value: 5, target: "all", duration: 3 },
+    ],
+    icon: "sparkles",
+  },
+];
+
+// ============================================
+// BREAKTHROUGH EVENT TEMPLATES
+// (Converted from data/breakthroughEvents.ts for engine integration)
+// ============================================
+
+const BREAKTHROUGH_EVENT_TEMPLATES: GameEvent[] = [
+  {
+    id: "bt_nano_materials",
+    type: "opportunity",
+    title: "Nano-Material Synthesis Breakthrough",
+    description: "Your R&D team discovers a method to synthesize carbon nanotubes at scale. Ultra-durable, ultra-light construction unlocked.",
+    triggerConditions: [{ type: "metric", metric: "rdProgress", operator: ">=", value: 300 }],
+    baseProbability: 0.03,
+    duration: 0,
+    effects: [
+      { type: "quality_modifier", value: 8, target: "all" },
+      { type: "cost_modifier", value: 0.9 },
+    ],
+    playerChoices: [
+      {
+        id: "invest",
+        label: "Full Investment",
+        description: "Commit $45M to scale nano-material production",
+        cost: 45_000_000,
+        effects: [
+          { type: "quality_modifier", value: 12, target: "all" },
+          { type: "cost_modifier", value: 0.85 },
+          { type: "brand_modifier", value: 0.05 },
+        ],
+      },
+      {
+        id: "license",
+        label: "License the Technology",
+        description: "License to others for immediate revenue",
+        cost: 0,
+        effects: [
+          { type: "cash_change", value: 20_000_000 },
+          { type: "brand_modifier", value: 0.02 },
+        ],
+      },
+    ],
+    icon: "atom",
+  },
+  {
+    id: "bt_ai_chip",
+    type: "opportunity",
+    title: "Neural Processing Architecture",
+    description: "A breakthrough in on-device AI processing enables phones that learn and adapt to users.",
+    triggerConditions: [{ type: "metric", metric: "rdProgress", operator: ">=", value: 400 }],
+    baseProbability: 0.02,
+    duration: 0,
+    effects: [
+      { type: "quality_modifier", value: 10, target: "all" },
+      { type: "brand_modifier", value: 0.05 },
+    ],
+    icon: "brain",
+  },
+  {
+    id: "bt_solid_state_battery",
+    type: "opportunity",
+    title: "Solid-State Battery Breakthrough",
+    description: "A solid-state battery that charges in 5 minutes and lasts 3 days. Transforms battery performance.",
+    triggerConditions: [{ type: "metric", metric: "rdProgress", operator: ">=", value: 250 }],
+    baseProbability: 0.03,
+    duration: 0,
+    effects: [
+      { type: "quality_modifier", value: 6, target: "all" },
+      { type: "cost_modifier", value: 0.92 },
+    ],
+    playerChoices: [
+      {
+        id: "exclusive",
+        label: "Exclusive Production",
+        description: "Keep the technology proprietary for competitive edge",
+        cost: 40_000_000,
+        effects: [
+          { type: "quality_modifier", value: 10, target: "all" },
+          { type: "brand_modifier", value: 0.08 },
+        ],
+      },
+      {
+        id: "partnership",
+        label: "Industry Partnership",
+        description: "Share costs and accelerate adoption",
+        cost: 15_000_000,
+        effects: [
+          { type: "quality_modifier", value: 6, target: "all" },
+          { type: "esg_modifier", value: 100 },
+        ],
+      },
+    ],
+    icon: "battery-charging",
+  },
+];
+
+// ============================================
+// CONTRACT ORDER EVENT TEMPLATES
+// (NPC bulk purchase contracts offering guaranteed revenue)
+// ============================================
+
+const CONTRACT_EVENT_TEMPLATES: GameEvent[] = [
+  {
+    id: "contract_govt_school",
+    type: "opportunity",
+    title: "Government School Device Order",
+    description: "The National Education Board needs affordable devices for a nationwide school programme. High volume, tight deadline.",
+    triggerConditions: [{ type: "round", operator: ">=", value: 4 }],
+    baseProbability: 0.12,
+    duration: 3,
+    effects: [],
+    playerChoices: [
+      {
+        id: "accept",
+        label: "Accept Contract",
+        description: "Commit to delivering 5,000-15,000 Budget phones at 5% premium",
+        cost: 0,
+        effects: [
+          { type: "revenue_modifier", value: 1.05, duration: 3 },
+          { type: "demand_modifier", value: 1.1, duration: 3 },
+        ],
+      },
+      {
+        id: "decline",
+        label: "Decline Order",
+        description: "Focus on retail sales instead",
+        cost: 0,
+        effects: [],
+      },
+    ],
+    icon: "file-text",
+  },
+  {
+    id: "contract_telecom_bundle",
+    type: "opportunity",
+    title: "Telecom Bundle Partnership",
+    description: "TeleCom Corp wants to bundle your phones with their new plan. High volume, decent premium.",
+    triggerConditions: [{ type: "round", operator: ">=", value: 3 }],
+    baseProbability: 0.10,
+    duration: 4,
+    effects: [],
+    playerChoices: [
+      {
+        id: "accept",
+        label: "Accept Partnership",
+        description: "Supply 8,000-20,000 Budget phones at 8% premium",
+        cost: 0,
+        effects: [
+          { type: "revenue_modifier", value: 1.08, duration: 4 },
+          { type: "brand_modifier", value: 0.02 },
+        ],
+      },
+      {
+        id: "decline",
+        label: "Pass",
+        description: "Maintain pricing independence",
+        cost: 0,
+        effects: [],
+      },
+    ],
+    icon: "phone",
+  },
+  {
+    id: "contract_enterprise_rollout",
+    type: "opportunity",
+    title: "Enterprise Device Rollout",
+    description: "FinServ Holdings is deploying secure devices to their global workforce. Premium price, strict SLA.",
+    triggerConditions: [
+      { type: "round", operator: ">=", value: 8 },
+      { type: "metric", metric: "brandValue", operator: ">", value: 0.3 },
+    ],
+    baseProbability: 0.07,
+    duration: 4,
+    effects: [],
+    playerChoices: [
+      {
+        id: "accept",
+        label: "Accept Enterprise Contract",
+        description: "Deliver 1,000-4,000 Professional phones at 18% premium. Steep failure penalty.",
+        cost: 0,
+        effects: [
+          { type: "revenue_modifier", value: 1.18, duration: 4 },
+          { type: "brand_modifier", value: 0.04 },
+        ],
+      },
+      {
+        id: "decline",
+        label: "Decline",
+        description: "Too risky for current capacity",
+        cost: 0,
+        effects: [],
+      },
+    ],
+    icon: "building-2",
+  },
+  {
+    id: "contract_retail_chain",
+    type: "opportunity",
+    title: "MegaMart Holiday Promotion",
+    description: "MegaMart wants an exclusive run of your General segment phone for their holiday promotion.",
+    triggerConditions: [{ type: "round", operator: ">=", value: 5 }],
+    baseProbability: 0.10,
+    duration: 3,
+    effects: [],
+    playerChoices: [
+      {
+        id: "accept",
+        label: "Accept Retail Deal",
+        description: "Supply 3,000-10,000 General phones at 10% premium",
+        cost: 0,
+        effects: [
+          { type: "revenue_modifier", value: 1.10, duration: 3 },
+          { type: "demand_modifier", value: 1.15, duration: 2 },
+        ],
+      },
+      {
+        id: "decline",
+        label: "Pass",
+        description: "Keep inventory for direct sales",
+        cost: 0,
+        effects: [],
+      },
+    ],
+    icon: "store",
+  },
+];
+
+// ============================================
 // ENGINE
 // ============================================
 
@@ -532,7 +871,15 @@ export class EventEngine {
     const newEvents: GameEvent[] = [];
     const pendingChoices: { event: GameEvent; choices: EventChoice[] }[] = [];
 
-    for (const template of EVENT_TEMPLATES) {
+    // Combine all event template sources
+    const allTemplates = [
+      ...EVENT_TEMPLATES,
+      ...SUPPLY_CHAIN_EVENT_TEMPLATES,
+      ...BREAKTHROUGH_EVENT_TEMPLATES,
+      ...CONTRACT_EVENT_TEMPLATES,
+    ];
+
+    for (const template of allTemplates) {
       if (this.shouldTriggerEvent(template, state, round, config, ctx)) {
         // Check if event is already active
         const isActive = eventState.activeEvents.some(
@@ -672,6 +1019,8 @@ export class EventEngine {
         return state.workforce?.averageMorale ?? 70;
       case "defectRate":
         return state.factories?.[0]?.defectRate ?? 0.05;
+      case "rdProgress":
+        return state.rdProgress ?? 0;
       default:
         return 0;
     }
@@ -706,7 +1055,13 @@ export class EventEngine {
     round: number,
     ctx: EngineContext
   ): { success: boolean; effects: EventEffect[]; message: string } {
-    const event = EVENT_TEMPLATES.find((e) => e.id === eventId);
+    const allTemplates = [
+      ...EVENT_TEMPLATES,
+      ...SUPPLY_CHAIN_EVENT_TEMPLATES,
+      ...BREAKTHROUGH_EVENT_TEMPLATES,
+      ...CONTRACT_EVENT_TEMPLATES,
+    ];
+    const event = allTemplates.find((e) => e.id === eventId);
     if (!event || !event.playerChoices) {
       return { success: false, effects: [], message: "Event not found" };
     }
@@ -796,7 +1151,12 @@ export class EventEngine {
    * Get all available event templates
    */
   static getEventTemplates(): GameEvent[] {
-    return EVENT_TEMPLATES;
+    return [
+      ...EVENT_TEMPLATES,
+      ...SUPPLY_CHAIN_EVENT_TEMPLATES,
+      ...BREAKTHROUGH_EVENT_TEMPLATES,
+      ...CONTRACT_EVENT_TEMPLATES,
+    ];
   }
 }
 

@@ -29,7 +29,7 @@ import { HRModule } from "../modules/HRModule";
 import { FinanceModule } from "../modules/FinanceModule";
 import { MarketingModule } from "../modules/MarketingModule";
 import { RDModule } from "../modules/RDModule";
-import { MarketSimulator } from "../market/MarketSimulator";
+import { MarketSimulator, type TeamMarketPosition } from "../market/MarketSimulator";
 import { cloneTeamState, cloneDecisions } from "../utils/stateUtils";
 import {
   createEngineContext,
@@ -70,6 +70,8 @@ export interface SimulationOutput {
   newMarketState: MarketState;
   rankings: Array<{ teamId: string; rank: number; epsRank: number; shareRank: number }>;
   summaryMessages: string[];
+  /** Market positions per team per segment from MarketSimulator */
+  marketPositions: TeamMarketPosition[];
   /** Audit trail for verification and replay */
   auditTrail: {
     /** Seed bundle used for this round */
@@ -244,7 +246,11 @@ export class SimulationEngine {
       team.state.marketShare = teamMarketShares;
       team.state.revenue = teamRevenue;
 
-      // Calculate costs
+      // Add revenue to cash — modules already deducted their costs from cash,
+      // so adding revenue ensures cash accumulates correctly across rounds
+      team.state.cash += teamRevenue;
+
+      // Calculate costs (for net income reporting only — already deducted from cash by modules)
       const totalCosts = this.calculateTotalCosts(team.state, team.moduleResults);
 
       // Calculate net income
@@ -363,6 +369,7 @@ export class SimulationEngine {
       newMarketState,
       rankings,
       summaryMessages,
+      marketPositions: marketResult.positions,
       auditTrail: {
         seedBundle,
         finalStateHashes,

@@ -96,13 +96,40 @@ export class HRModule {
     // Process hires
     if (decisions.hires) {
       for (const hire of decisions.hires) {
-        // Generate new employee with deterministic ID
-        const newEmployee = this.createEmployee(
-          hire.role,
-          hire.factoryId,
-          state.factories[0]?.id || "factory-1",
-          ctx
-        );
+        let newEmployee: Employee;
+
+        if (hire.candidateData) {
+          // Use pre-generated candidate data from recruitment search
+          const id = ctx
+            ? ctx.idGenerator.next("employee")
+            : `emp-r0-${Date.now().toString(36)}-${Math.floor(Math.random() * 10000)}`;
+          const factoryId = hire.factoryId || state.factories[0]?.id || "factory-1";
+          newEmployee = {
+            id,
+            role: hire.role,
+            name: hire.candidateData.name,
+            stats: hire.candidateData.stats,
+            salary: hire.candidateData.salary,
+            hiredRound: ctx?.roundNumber ?? state.round ?? 0,
+            factoryId,
+            morale: 75,
+            burnout: 0,
+            trainingHistory: {
+              programsThisYear: 0,
+              lastTrainingRound: 0,
+              totalProgramsCompleted: 0,
+            },
+          };
+        } else {
+          // Fallback: generate random employee
+          newEmployee = this.createEmployee(
+            hire.role,
+            hire.factoryId,
+            state.factories[0]?.id || "factory-1",
+            ctx
+          );
+        }
+
         const hiringCost = newEmployee.salary * CONSTANTS.HIRING_COST_MULTIPLIER;
 
         if (newState.cash >= hiringCost) {

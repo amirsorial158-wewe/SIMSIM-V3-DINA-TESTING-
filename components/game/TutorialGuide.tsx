@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { useTutorialStore } from "@/lib/stores/tutorialStore";
+import { useTutorialStore, STAGE_NAMES, type TutorialStage } from "@/lib/stores/tutorialStore";
 import { TutorialSpotlight } from "@/components/game/TutorialSpotlight";
 import { GlossaryText } from "@/components/game/GlossaryText";
+import { PlayStyleProfileCard } from "@/components/game/PlayStyleProfileCard";
 import { Button } from "@/components/ui/button";
 import {
   ChevronLeft,
@@ -14,6 +15,10 @@ import {
   Target,
   CheckCircle,
   XCircle,
+  GraduationCap,
+  MessageSquare,
+  Eye,
+  Link2,
 } from "lucide-react";
 
 interface TutorialGuideProps {
@@ -23,6 +28,7 @@ interface TutorialGuideProps {
 export function TutorialGuide({ gameId }: TutorialGuideProps) {
   const {
     isActive,
+    depth,
     currentStep,
     steps,
     selectedChoice,
@@ -50,6 +56,31 @@ export function TutorialGuide({ gameId }: TutorialGuideProps) {
     }
   }, [currentStep, step?.targetPath, gameId, router, pathname]);
 
+  // Compute stage info for full tutorial
+  const stageInfo = useMemo(() => {
+    if (depth !== "full" || !step?.stage) return null;
+
+    const currentStage = step.stage;
+    const stagesUsed = new Set(steps.filter(s => s.stage).map(s => s.stage!));
+    const allStages = Array.from(stagesUsed).sort((a, b) => a - b);
+
+    // Steps in current stage
+    const stageSteps = steps.filter(s => s.stage === currentStage);
+    const stageStepIndex = stageSteps.indexOf(step);
+
+    // Completed stages
+    const completedStages = allStages.filter(s => s < currentStage);
+
+    return {
+      currentStage,
+      stageName: STAGE_NAMES[currentStage],
+      allStages,
+      completedStages,
+      stageStepCount: stageSteps.length,
+      stageStepIndex: stageStepIndex + 1,
+    };
+  }, [depth, step, steps, currentStep]);
+
   if (!isActive || !step) return null;
 
   const isFirst = currentStep === 0;
@@ -57,6 +88,14 @@ export function TutorialGuide({ gameId }: TutorialGuideProps) {
   const isCenter = step.position === "center";
   const progress = ((currentStep + 1) / steps.length) * 100;
   const canAdvance = !step.requiresInteraction || interactionComplete;
+  const hasStages = stageInfo !== null;
+
+  // Exit gate: use custom label instead of "Next"
+  const nextButtonLabel = step.exitGate && step.exitGateLabel
+    ? step.exitGateLabel
+    : isLast
+    ? "Start Playing!"
+    : "Next";
 
   return (
     <>
@@ -102,27 +141,87 @@ export function TutorialGuide({ gameId }: TutorialGuideProps) {
               background: "rgb(15 23 42)",
             }}
           >
-            {/* Step indicator + progress bar */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="font-mono text-[10px] font-bold uppercase tracking-[2px] text-cyan-400">
-                  Step {currentStep + 1} of {steps.length}
-                </span>
-                <button
-                  onClick={skipTutorial}
-                  className="text-[10px] cursor-pointer hover:underline text-slate-400 bg-transparent border-none"
-                >
-                  <X className="w-3 h-3 inline mr-1" />
-                  Skip Tutorial
-                </button>
+            {/* Stage progress bar (full tutorial) OR simple step indicator */}
+            {hasStages ? (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-[10px] font-bold uppercase tracking-[2px] text-cyan-400">
+                      {stageInfo.stageName}
+                    </span>
+                    <span className="text-[10px] text-slate-500">
+                      {stageInfo.stageStepIndex}/{stageInfo.stageStepCount}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {/* Advisor badge */}
+                    {step.advisorLevel !== undefined && (
+                      <AdvisorBadge level={step.advisorLevel} />
+                    )}
+                    <button
+                      onClick={skipTutorial}
+                      className="text-[10px] cursor-pointer hover:underline text-slate-400 bg-transparent border-none"
+                    >
+                      <X className="w-3 h-3 inline mr-1" />
+                      Skip
+                    </button>
+                  </div>
+                </div>
+                {/* Stage segments */}
+                <div className="flex gap-1">
+                  {stageInfo.allStages.map((stage) => {
+                    const isCompleted = stageInfo.completedStages.includes(stage);
+                    const isCurrent = stage === stageInfo.currentStage;
+                    return (
+                      <div key={stage} className="flex-1 space-y-0.5">
+                        <div
+                          className={`h-1.5 rounded-full transition-all duration-500 ${
+                            isCompleted
+                              ? "bg-emerald-500"
+                              : isCurrent
+                              ? "bg-gradient-to-r from-cyan-500 to-cyan-600"
+                              : "bg-slate-700"
+                          }`}
+                          style={
+                            isCurrent
+                              ? {
+                                  background: `linear-gradient(to right, #06b6d4 ${(stageInfo.stageStepIndex / stageInfo.stageStepCount) * 100}%, rgb(51 65 85) ${(stageInfo.stageStepIndex / stageInfo.stageStepCount) * 100}%)`,
+                                }
+                              : undefined
+                          }
+                        />
+                        <div className={`text-[8px] text-center font-medium ${
+                          isCurrent ? "text-cyan-400" : isCompleted ? "text-emerald-500" : "text-slate-600"
+                        }`}>
+                          S{stage}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-              <div className="h-1 rounded-full overflow-hidden bg-slate-700">
-                <div
-                  className="h-full rounded-full transition-all duration-500 bg-gradient-to-r from-cyan-500 to-cyan-600"
-                  style={{ width: `${progress}%` }}
-                />
+            ) : (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-[10px] font-bold uppercase tracking-[2px] text-cyan-400">
+                    Step {currentStep + 1} of {steps.length}
+                  </span>
+                  <button
+                    onClick={skipTutorial}
+                    className="text-[10px] cursor-pointer hover:underline text-slate-400 bg-transparent border-none"
+                  >
+                    <X className="w-3 h-3 inline mr-1" />
+                    Skip Tutorial
+                  </button>
+                </div>
+                <div className="h-1 rounded-full overflow-hidden bg-slate-700">
+                  <div
+                    className="h-full rounded-full transition-all duration-500 bg-gradient-to-r from-cyan-500 to-cyan-600"
+                    style={{ width: `${progress}%` }}
+                  />
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Title */}
             <div className="text-[18px] font-bold text-white">{step.title}</div>
@@ -131,6 +230,20 @@ export function TutorialGuide({ gameId }: TutorialGuideProps) {
             <div className="text-[13px] leading-relaxed text-slate-300 whitespace-pre-line">
               <GlossaryText text={step.description} />
             </div>
+
+            {/* === Play Style Profile (graduation step) === */}
+            {step.id === "full-s6-graduation" && (
+              <PlayStyleProfileCard />
+            )}
+
+            {/* === Mechanic Link callout === */}
+            {step.mechanicLink && (
+              <div className="rounded-lg p-3 text-[12px] bg-purple-500/10 border-l-[3px] border-purple-500 text-slate-200">
+                <Link2 className="w-3 h-3 inline mr-1 text-purple-400" />
+                <span className="font-bold text-purple-400">Mechanic Link: </span>
+                <GlossaryText text={step.mechanicLink} />
+              </div>
+            )}
 
             {/* === Interactive: Choice Cards === */}
             {step.interactive === "choice" && step.choices && (
@@ -275,38 +388,60 @@ export function TutorialGuide({ gameId }: TutorialGuideProps) {
                 style={{ pointerEvents: canAdvance ? "auto" : "none", cursor: canAdvance ? "pointer" : "not-allowed" }}
                 className={`text-[12px] font-bold uppercase tracking-[1px] transition-all ${
                   canAdvance
-                    ? "bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-400 hover:to-cyan-500 text-slate-900 hover:scale-105"
+                    ? step.exitGate
+                      ? "bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-white hover:scale-105"
+                      : "bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-400 hover:to-cyan-500 text-slate-900 hover:scale-105"
                     : "bg-slate-700 text-slate-500 cursor-not-allowed"
                 }`}
               >
-                {isLast ? "Start Playing!" : "Next"}
-                {!isLast && <ChevronRight className="w-3 h-3 ml-1" />}
+                {nextButtonLabel}
+                {!isLast && !step.exitGate && <ChevronRight className="w-3 h-3 ml-1" />}
               </Button>
             </div>
 
-            {/* Progress dots */}
-            <div className="flex items-center justify-center gap-1 pt-1">
-              {steps.map((_, i) => (
-                <div
-                  key={i}
-                  className="rounded-full transition-all"
-                  style={{
-                    width: i === currentStep ? 12 : 6,
-                    height: 6,
-                    background:
-                      i === currentStep
-                        ? "#06b6d4"
-                        : i < currentStep
-                          ? "rgba(6,182,212,0.4)"
-                          : "rgb(51 65 85)",
-                  }}
-                />
-              ))}
-            </div>
+            {/* Progress dots (only for non-staged tutorials) */}
+            {!hasStages && (
+              <div className="flex items-center justify-center gap-1 pt-1">
+                {steps.map((_, i) => (
+                  <div
+                    key={i}
+                    className="rounded-full transition-all"
+                    style={{
+                      width: i === currentStep ? 12 : 6,
+                      height: 6,
+                      background:
+                        i === currentStep
+                          ? "#06b6d4"
+                          : i < currentStep
+                            ? "rgba(6,182,212,0.4)"
+                            : "rgb(51 65 85)",
+                    }}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
     </>
+  );
+}
+
+/** Advisor scaffolding level badge */
+function AdvisorBadge({ level }: { level: 0 | 1 | 2 }) {
+  const config = {
+    0: { icon: GraduationCap, label: "Full Guidance", color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30" },
+    1: { icon: MessageSquare, label: "Options Shown", color: "text-amber-400 bg-amber-500/10 border-amber-500/30" },
+    2: { icon: Eye, label: "You Decide", color: "text-slate-400 bg-slate-500/10 border-slate-500/30" },
+  }[level];
+
+  const Icon = config.icon;
+
+  return (
+    <span className={`inline-flex items-center gap-1 text-[9px] font-medium px-1.5 py-0.5 rounded-full border ${config.color}`}>
+      <Icon className="w-2.5 h-2.5" />
+      {config.label}
+    </span>
   );
 }
 

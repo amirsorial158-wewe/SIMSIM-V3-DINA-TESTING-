@@ -9,6 +9,40 @@ import type { ProductFeatureSet } from "./features";
 // PRODUCT
 // ============================================
 
+/** Quality grade determines pricing multiplier, production time, and market segment access */
+export type QualityGrade = "standard" | "premium" | "artisan";
+
+/** Quality grade configuration */
+export const QUALITY_GRADE_CONFIG: Record<QualityGrade, {
+  label: string;
+  priceMultiplier: number;
+  productionTimeMultiplier: number;
+  minMaterialTier: number;
+  description: string;
+}> = {
+  standard: {
+    label: "Standard",
+    priceMultiplier: 1.0,
+    productionTimeMultiplier: 1.0,
+    minMaterialTier: 1,
+    description: "Base quality production. Fastest output, standard pricing.",
+  },
+  premium: {
+    label: "Premium",
+    priceMultiplier: 1.3,
+    productionTimeMultiplier: 1.5,
+    minMaterialTier: 3,
+    description: "Enhanced materials and QC. 30% price premium, 50% slower production.",
+  },
+  artisan: {
+    label: "Artisan",
+    priceMultiplier: 1.6,
+    productionTimeMultiplier: 2.0,
+    minMaterialTier: 5,
+    description: "Hand-finished, top-tier materials. 60% price premium, 2x production time.",
+  },
+};
+
 export interface Product {
   id: string;
   name: string;
@@ -36,4 +70,8 @@ export interface Product {
   featureSet?: ProductFeatureSet;
   /** Which tech IDs were applied when this product was created */
   appliedTechs?: string[];
+
+  // === Quality Grade System ===
+  /** Quality grade: standard (default), premium, or artisan */
+  qualityGrade?: QualityGrade;
 }

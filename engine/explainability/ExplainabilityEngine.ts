@@ -8,6 +8,7 @@
  */
 
 import type { TeamState, Segment } from "../types";
+import { CONSTANTS } from "../types";
 import type { TeamMarketPosition } from "../market/MarketSimulator";
 import type {
   SegmentScoreBreakdown,
@@ -618,14 +619,7 @@ export class ExplainabilityEngine {
   // ============================================
 
   private static getSegmentWeights(segment: Segment): { price: number; quality: number; brand: number; esg: number; features: number } {
-    const weights: Record<Segment, { price: number; quality: number; brand: number; esg: number; features: number }> = {
-      Budget: { price: 50, quality: 22, brand: 8, esg: 8, features: 12 },
-      General: { price: 32, quality: 28, brand: 10, esg: 10, features: 20 },
-      Enthusiast: { price: 20, quality: 40, brand: 10, esg: 10, features: 20 },
-      Professional: { price: 15, quality: 42, brand: 10, esg: 16, features: 17 },
-      "Active Lifestyle": { price: 25, quality: 32, brand: 12, esg: 10, features: 21 },
-    };
-    return weights[segment];
+    return CONSTANTS.SEGMENT_WEIGHTS[segment];
   }
 
   private static calculateCompetitorScores(

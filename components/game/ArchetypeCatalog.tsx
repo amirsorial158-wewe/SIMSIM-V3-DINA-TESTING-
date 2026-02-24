@@ -1,12 +1,14 @@
 "use client";
 
 import { useMemo } from "react";
-import { Lock, Unlock, Smartphone, Star, ChevronRight } from "lucide-react";
+import { Lock, Unlock, Smartphone, Star, ChevronRight, AlertTriangle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { ALL_ARCHETYPES, getAvailableArchetypes } from "@/engine/types/archetypes";
 import type { PhoneArchetype } from "@/engine/types/archetypes";
 import type { TechNode } from "@/engine/modules/RDExpansions";
+import type { TeamState } from "@/engine/types";
+import { checkArchetypeEligibility, type ArchetypeBlocker } from "@/lib/utils/archetypeEligibility";
 
 // ============================================
 // PROPS
@@ -17,6 +19,7 @@ interface ArchetypeCatalogProps {
   allTechNodes: { id: string; tier: number }[];
   onSelectArchetype: (archetypeId: string) => void;
   selectedArchetype?: string;
+  teamState?: TeamState | null;
 }
 
 // ============================================
@@ -58,6 +61,7 @@ export function ArchetypeCatalog({
   allTechNodes,
   onSelectArchetype,
   selectedArchetype,
+  teamState,
 }: ArchetypeCatalogProps) {
   // Compute available archetypes
   const availableIds = useMemo(() => {
@@ -78,6 +82,23 @@ export function ArchetypeCatalog({
     // Sort by tier number
     return Array.from(groups.entries()).sort(([a], [b]) => a - b);
   }, []);
+
+  // Compute eligibility blockers when teamState is available
+  const eligibilityMap = useMemo(() => {
+    if (!teamState) return new Map<string, ArchetypeBlocker[]>();
+    const map = new Map<string, ArchetypeBlocker[]>();
+    for (const archetype of ALL_ARCHETYPES) {
+      const result = checkArchetypeEligibility(archetype.id, teamState);
+      if (result && result.blockers.length > 0) {
+        // Filter out rd_tech blockers since those are already shown
+        const nonTechBlockers = result.blockers.filter((b) => b.type !== "rd_tech");
+        if (nonTechBlockers.length > 0) {
+          map.set(archetype.id, nonTechBlockers);
+        }
+      }
+    }
+    return map;
+  }, [teamState]);
 
   // Count available per tier
   const availableCountByTier = useMemo(() => {
@@ -124,6 +145,7 @@ export function ArchetypeCatalog({
                   isSelected={selectedArchetype === archetype.id}
                   unlockedTechs={unlockedTechs}
                   onSelect={onSelectArchetype}
+                  blockers={eligibilityMap.get(archetype.id)}
                 />
               ))}
             </div>
@@ -144,6 +166,7 @@ interface ArchetypeCardProps {
   isSelected: boolean;
   unlockedTechs: string[];
   onSelect: (archetypeId: string) => void;
+  blockers?: ArchetypeBlocker[];
 }
 
 function ArchetypeCard({
@@ -152,6 +175,7 @@ function ArchetypeCard({
   isSelected,
   unlockedTechs,
   onSelect,
+  blockers,
 }: ArchetypeCardProps) {
   const missingTechs = useMemo(() => {
     return archetype.requiredTech.filter((t) => !unlockedTechs.includes(t));
@@ -260,6 +284,21 @@ function ArchetypeCard({
       {!isAvailable && missingTechs.length > 0 && (
         <div className="mt-2 text-[10px] text-red-400/80">
           Missing: {missingTechs.join(", ")}
+        </div>
+      )}
+
+      {/* Eligibility blockers (machinery, material, cash) */}
+      {blockers && blockers.length > 0 && (
+        <div className="mt-2 space-y-0.5">
+          {blockers.map((b, i) => (
+            <div key={i} className={cn(
+              "flex items-center gap-1 text-[10px]",
+              b.severity === "blocking" ? "text-red-400/80" : "text-amber-400/80"
+            )}>
+              <AlertTriangle className="w-2.5 h-2.5 flex-shrink-0" />
+              <span>{b.description}</span>
+            </div>
+          ))}
         </div>
       )}
 

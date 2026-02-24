@@ -12,10 +12,12 @@ interface FinancialStatementsProps {
 }
 
 export function FinancialStatementsComponent({ statements, previousStatements }: FinancialStatementsProps) {
-  const { incomeStatement, cashFlowStatement, balanceSheet, ratios, validation } = statements;
+  const { incomeStatement, cashFlowStatement, balanceSheet } = statements;
+  const ratios = (statements as any).ratios ?? null;
+  const validation = (statements as any).validation ?? { valid: true, errors: [] };
 
   // Calculate financial health
-  const healthScore = calculateHealthScore(ratios);
+  const healthScore = ratios ? calculateHealthScore(ratios) : 0;
   const healthGrade = getHealthGrade(healthScore);
   const healthColor = getHealthColor(healthGrade);
 
@@ -38,21 +40,21 @@ export function FinancialStatementsComponent({ statements, previousStatements }:
           <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
             <MetricCard
               title="Profitability"
-              value={ratios.profitability.netMargin}
+              value={ratios?.profitability?.netMargin ?? 0}
               format="percent"
               icon={<DollarSign className="h-4 w-4" />}
               threshold={{ good: 15, warning: 5 }}
             />
             <MetricCard
               title="Liquidity"
-              value={ratios.liquidity.currentRatio}
+              value={ratios?.liquidity?.currentRatio ?? 0}
               format="ratio"
               icon={<Activity className="h-4 w-4" />}
               threshold={{ good: 2.0, warning: 1.2 }}
             />
             <MetricCard
               title="Leverage"
-              value={ratios.leverage.debtToEquity}
+              value={ratios?.leverage?.debtToEquity ?? 0}
               format="ratio"
               icon={<BarChart3 className="h-4 w-4" />}
               threshold={{ good: 0.3, warning: 0.6 }}
@@ -60,14 +62,14 @@ export function FinancialStatementsComponent({ statements, previousStatements }:
             />
             <MetricCard
               title="Efficiency"
-              value={ratios.efficiency.assetTurnover}
+              value={ratios?.efficiency?.assetTurnover ?? 0}
               format="ratio"
               icon={<TrendingUp className="h-4 w-4" />}
               threshold={{ good: 1.5, warning: 1.0 }}
             />
             <MetricCard
               title="Free Cash Flow"
-              value={cashFlowStatement.freeCashFlow}
+              value={cashFlowStatement?.freeCashFlow ?? 0}
               format="currency"
               icon={<DollarSign className="h-4 w-4" />}
               threshold={{ good: 50_000_000, warning: 0 }}
@@ -128,7 +130,9 @@ export function FinancialStatementsComponent({ statements, previousStatements }:
         </TabsContent>
 
         <TabsContent value="ratios" className="space-y-4 mt-4">
-          <FinancialRatiosCard ratios={ratios} />
+          {ratios ? <FinancialRatiosCard ratios={ratios} /> : (
+            <Card><CardContent className="py-8 text-center text-gray-500">Financial ratios not yet available.</CardContent></Card>
+          )}
         </TabsContent>
 
         <TabsContent value="insights" className="space-y-4 mt-4">
@@ -151,23 +155,22 @@ interface MetricCardProps {
 }
 
 function MetricCard({ title, value, format, icon, threshold, inverse }: MetricCardProps) {
+  const safeValue = value ?? 0;
   const formatted =
     format === "currency"
-      ? `$${(value / 1_000_000).toFixed(1)}M`
+      ? `$${(safeValue / 1_000_000).toFixed(1)}M`
       : format === "percent"
-        ? `${value.toFixed(1)}%`
-        : value.toFixed(2);
+        ? `${safeValue.toFixed(1)}%`
+        : safeValue.toFixed(2);
 
   let status: "good" | "warning" | "bad" = "good";
   if (threshold) {
     if (inverse) {
-      // Lower is better (e.g., debt-to-equity)
-      if (value > threshold.warning) status = "bad";
-      else if (value > threshold.good) status = "warning";
+      if (safeValue > threshold.warning) status = "bad";
+      else if (safeValue > threshold.good) status = "warning";
     } else {
-      // Higher is better
-      if (value < threshold.warning) status = "bad";
-      else if (value < threshold.good) status = "warning";
+      if (safeValue < threshold.warning) status = "bad";
+      else if (safeValue < threshold.good) status = "warning";
     }
   }
 
@@ -369,7 +372,7 @@ function CashFlowStatementCard({ statement, previous }: { statement: any; previo
             <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
               <p className="text-sm font-semibold text-blue-800">Free Cash Flow</p>
               <p className="text-2xl font-bold text-blue-700">
-                ${(statement.freeCashFlow / 1_000_000).toFixed(1)}M
+                ${((statement.freeCashFlow ?? 0) / 1_000_000).toFixed(1)}M
               </p>
               <p className="text-xs text-blue-600 mt-1">
                 Operating Cash Flow - Capital Expenditures
@@ -684,8 +687,9 @@ interface StatementLineProps {
 }
 
 function StatementLine({ label, value, previous, margin, bold, negative, className }: StatementLineProps) {
-  const displayValue = negative ? -Math.abs(value) : value;
-  const change = previous !== undefined ? ((value - previous) / Math.abs(previous)) * 100 : null;
+  const safeValue = value ?? 0;
+  const displayValue = negative ? -Math.abs(safeValue) : safeValue;
+  const change = previous !== undefined ? ((safeValue - previous) / Math.abs(previous)) * 100 : null;
 
   return (
     <div className={`flex items-center justify-between py-1 ${className || ""}`}>
@@ -721,22 +725,23 @@ interface RatioLineProps {
 }
 
 function RatioLine({ label, value, format, threshold, inverse }: RatioLineProps) {
+  const safeValue = value ?? 0;
   const formatted =
     format === "currency"
-      ? `$${(value / 1_000_000).toFixed(1)}M`
+      ? `$${(safeValue / 1_000_000).toFixed(1)}M`
       : format === "percent"
-        ? `${value.toFixed(1)}%`
-        : value.toFixed(2);
+        ? `${safeValue.toFixed(1)}%`
+        : safeValue.toFixed(2);
 
   let status: "good" | "warning" | "bad" | null = null;
   if (threshold) {
     if (inverse) {
-      if (value > threshold.warning) status = "bad";
-      else if (value > threshold.good) status = "warning";
+      if (safeValue > threshold.warning) status = "bad";
+      else if (safeValue > threshold.good) status = "warning";
       else status = "good";
     } else {
-      if (value < threshold.warning) status = "bad";
-      else if (value < threshold.good) status = "warning";
+      if (safeValue < threshold.warning) status = "bad";
+      else if (safeValue < threshold.good) status = "warning";
       else status = "good";
     }
   }
@@ -755,6 +760,7 @@ function RatioLine({ label, value, format, threshold, inverse }: RatioLineProps)
 // Helper Functions
 
 function calculateHealthScore(ratios: any): number {
+  if (!ratios?.profitability || !ratios?.liquidity || !ratios?.leverage || !ratios?.efficiency || !ratios?.cashFlow) return 0;
   let score = 0;
 
   // Profitability (20 points)
@@ -858,43 +864,56 @@ function generateInsights(statements: any, previousStatements?: any) {
   const concerns: string[] = [];
   const recommendations: string[] = [];
 
-  const { ratios, incomeStatement, cashFlowStatement } = statements;
+  const ratios = statements?.ratios;
+  const cashFlowStatement = statements?.cashFlowStatement;
+
+  if (!ratios) return { strengths, concerns, recommendations };
 
   // Profitability
-  if (ratios.profitability.returnOnEquity > 20) {
-    strengths.push(`Excellent ROE of ${ratios.profitability.returnOnEquity.toFixed(1)}% demonstrates strong profitability`);
-  } else if (ratios.profitability.returnOnEquity < 5) {
-    concerns.push(`Low ROE of ${ratios.profitability.returnOnEquity.toFixed(1)}% suggests weak returns`);
-    recommendations.push("Focus on improving profit margins or reducing assets");
+  const roe = ratios.profitability?.returnOnEquity;
+  if (roe != null) {
+    if (roe > 20) {
+      strengths.push(`Excellent ROE of ${roe.toFixed(1)}% demonstrates strong profitability`);
+    } else if (roe < 5) {
+      concerns.push(`Low ROE of ${roe.toFixed(1)}% suggests weak returns`);
+      recommendations.push("Focus on improving profit margins or reducing assets");
+    }
   }
 
   // Cash conversion
-  const cashConversion = ratios.cashFlow.cashConversionRate;
-  if (cashConversion < 0.7) {
-    concerns.push(`Only ${(cashConversion * 100).toFixed(0)}% of net income converting to cash`);
-    recommendations.push("Improve accounts receivable collection or reduce inventory buildup");
-  } else if (cashConversion > 1.2) {
-    strengths.push(`Strong cash generation at ${(cashConversion * 100).toFixed(0)}% of net income`);
+  const cashConversion = ratios.cashFlow?.cashConversionRate;
+  if (cashConversion != null) {
+    if (cashConversion < 0.7) {
+      concerns.push(`Only ${(cashConversion * 100).toFixed(0)}% of net income converting to cash`);
+      recommendations.push("Improve accounts receivable collection or reduce inventory buildup");
+    } else if (cashConversion > 1.2) {
+      strengths.push(`Strong cash generation at ${(cashConversion * 100).toFixed(0)}% of net income`);
+    }
   }
 
   // Liquidity
-  if (ratios.liquidity.currentRatio < 1.0) {
-    concerns.push(`Current ratio of ${ratios.liquidity.currentRatio.toFixed(2)} below 1.0 - liquidity concerns`);
+  const currentRatio = ratios.liquidity?.currentRatio;
+  if (currentRatio != null && currentRatio < 1.0) {
+    concerns.push(`Current ratio of ${currentRatio.toFixed(2)} below 1.0 - liquidity concerns`);
     recommendations.push("Increase cash reserves or reduce short-term liabilities");
   }
 
   // Leverage
-  if (ratios.leverage.debtToEquity > 1.5) {
-    concerns.push(`High debt-to-equity ratio of ${ratios.leverage.debtToEquity.toFixed(2)} increases financial risk`);
+  const debtToEquity = ratios.leverage?.debtToEquity;
+  if (debtToEquity != null && debtToEquity > 1.5) {
+    concerns.push(`High debt-to-equity ratio of ${debtToEquity.toFixed(2)} increases financial risk`);
     recommendations.push("Consider reducing debt or raising equity capital");
   }
 
   // Free cash flow
-  if (cashFlowStatement.freeCashFlow < 0) {
-    concerns.push(`Negative free cash flow of $${(-cashFlowStatement.freeCashFlow / 1_000_000).toFixed(1)}M`);
-    recommendations.push("Reduce capital expenditures or improve operating cash flow");
-  } else if (cashFlowStatement.freeCashFlow > 50_000_000) {
-    strengths.push(`Strong free cash flow of $${(cashFlowStatement.freeCashFlow / 1_000_000).toFixed(1)}M`);
+  const fcf = cashFlowStatement?.freeCashFlow;
+  if (fcf != null) {
+    if (fcf < 0) {
+      concerns.push(`Negative free cash flow of $${(-fcf / 1_000_000).toFixed(1)}M`);
+      recommendations.push("Reduce capital expenditures or improve operating cash flow");
+    } else if (fcf > 50_000_000) {
+      strengths.push(`Strong free cash flow of $${(fcf / 1_000_000).toFixed(1)}M`);
+    }
   }
 
   return { strengths, concerns, recommendations };

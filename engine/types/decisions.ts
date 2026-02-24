@@ -2,7 +2,7 @@
  * Decision types for the Business Simulation Engine
  */
 
-import type { EmployeeRole, BenefitsPackage } from "./employee";
+import type { EmployeeRole, EmployeeStats, EngineerStats, SupervisorStats, BenefitsPackage } from "./employee";
 import type { Segment, Region, FactoryUpgrade } from "./factory";
 import type { MachineryDecisions } from "../machinery/types";
 
@@ -70,7 +70,17 @@ export interface ESGInitiatives {
 // ============================================
 
 export interface HRDecisions {
-  hires?: { factoryId: string; role: EmployeeRole; candidateId: string }[];
+  hires?: {
+    factoryId: string;
+    role: EmployeeRole;
+    candidateId: string;
+    /** Pre-generated candidate data from recruitment search — skips random generation */
+    candidateData?: {
+      name: string;
+      stats: EmployeeStats | EngineerStats | SupervisorStats;
+      salary: number;
+    };
+  }[];
   fires?: { employeeId: string }[];
   recruitmentSearches?: {
     role: EmployeeRole;

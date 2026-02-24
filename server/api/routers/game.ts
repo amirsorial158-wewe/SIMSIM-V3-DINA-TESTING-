@@ -2,6 +2,7 @@ import { z } from "zod";
 import { createTRPCRouter, publicProcedure, facilitatorProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { SimulationEngine, type SimulationInput } from "@/engine/core/SimulationEngine";
+import { ExplainabilityEngine } from "@/engine/explainability/ExplainabilityEngine";
 import type { TeamState, MarketState, AllDecisions, ComplexityPreset } from "@/engine/types";
 import { COMPLEXITY_PRESETS } from "@/engine/types";
 import { GAME_PRESETS, type GamePreset } from "@/engine/config/gamePresets";
@@ -463,6 +464,29 @@ export const gameRouter = createTRPCRouter({
 
       const simulationOutput = SimulationEngine.processRound(simulationInput);
 
+      // Generate explainability data for each team
+      const explainabilityResults: Record<string, unknown> = {};
+      for (const result of simulationOutput.results) {
+        const previousState = simulationTeams.find(t => t.id === result.teamId)?.state ?? null;
+        try {
+          explainabilityResults[result.teamId] = ExplainabilityEngine.generateExplainability(
+            result.teamId,
+            game.currentRound,
+            result.newState,
+            previousState,
+            simulationOutput.marketPositions,
+            simulationTeams.map(t => ({
+              id: t.id,
+              name: t.id,
+              state: simulationOutput.results.find(r => r.teamId === t.id)?.newState ?? t.state,
+            }))
+          );
+        } catch {
+          // ExplainabilityEngine is non-critical — log but don't block round
+          explainabilityResults[result.teamId] = null;
+        }
+      }
+
       // ATOMIC ROUND COMMIT: All database writes in a single transaction
       // If any write fails, the entire round is rolled back
       const nextRound = game.currentRound + 1;
@@ -490,6 +514,8 @@ export const gameRouter = createTRPCRouter({
                 netIncome: result.netIncome,
                 eps: result.newState.eps,
                 marketShare: result.marketShareBySegment,
+                // Explainability data (narratives, deltas, waterfall)
+                explainability: explainabilityResults[result.teamId] ?? null,
                 // Include audit trail in metrics
                 seedBundle: simulationOutput.auditTrail.seedBundle,
                 stateHash: simulationOutput.auditTrail.finalStateHashes[result.teamId],

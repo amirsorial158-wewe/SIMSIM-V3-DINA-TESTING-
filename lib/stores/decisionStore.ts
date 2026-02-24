@@ -38,7 +38,15 @@ export interface UIFinanceDecisions {
 }
 
 export interface UIHRDecisions {
-  hires: Array<{ role: string; candidateId: string }>;
+  hires: Array<{
+    role: string;
+    candidateId: string;
+    candidateData?: {
+      name: string;
+      stats: Record<string, number>;
+      salary: number;
+    };
+  }>;
   fires: Array<{ employeeId: string }>;
   recruitmentSearches: Array<{ role: string; tier: string }>;
   salaryAdjustment: number;
@@ -49,6 +57,7 @@ export interface UIMarketingDecisions {
   adBudgets: Record<string, Record<string, number>>;
   brandInvestment: number;
   promotions: Array<{ type: string; intensity: number }>;
+  brandActivities: string[];
 }
 
 export interface UIRDDecisions {
@@ -155,6 +164,7 @@ const initialMarketingDecisions: MarketingDecisions = {
   adBudgets: {},
   brandInvestment: 0,
   promotions: [],
+  brandActivities: [],
 };
 
 const initialRDDecisions: RDDecisions = {

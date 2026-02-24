@@ -294,17 +294,17 @@ export function TeamDetailPanel({ team, isExpanded, onToggle }: TeamDetailPanelP
                 <div className="grid grid-cols-2 gap-2">
                   <MetricBox
                     label="ESG Score"
-                    value={state.esgScore.toString()}
+                    value={(state.esgScore ?? 0).toString()}
                     icon={Leaf}
-                    variant={state.esgScore >= 80 ? "positive" : state.esgScore >= 50 ? "neutral" : "negative"}
+                    variant={(state.esgScore ?? 0) >= 80 ? "positive" : (state.esgScore ?? 0) >= 50 ? "neutral" : "negative"}
                   />
                   <MetricBox
                     label="CO2 Emissions"
-                    value={`${state.co2Emissions.toLocaleString()} tons`}
+                    value={`${(state.co2Emissions ?? 0).toLocaleString()} tons`}
                     icon={Factory}
-                    variant={state.co2Emissions <= 500 ? "positive" : state.co2Emissions <= 1500 ? "neutral" : "negative"}
+                    variant={(state.co2Emissions ?? 0) <= 500 ? "positive" : (state.co2Emissions ?? 0) <= 1500 ? "neutral" : "negative"}
                   />
-                  <MetricBox label="Patents" value={state.patents.toString()} icon={Lightbulb} />
+                  <MetricBox label="Patents" value={(state.patents ?? 0).toString()} icon={Lightbulb} />
                 </div>
               </TabsContent>
             </div>

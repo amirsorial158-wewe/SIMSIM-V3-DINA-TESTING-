@@ -16,6 +16,11 @@ import { Slider } from "@/components/ui/slider";
 import { trpc } from "@/lib/api/trpc";
 import { useDecisionStore } from "@/lib/stores/decisionStore";
 import { DecisionSubmitBar } from "@/components/game/DecisionSubmitBar";
+import { DecisionImpactPanel } from "@/components/game/DecisionImpactPanel";
+import { WarningBanner } from "@/components/game/WarningBanner";
+import { useRDPreview } from "@/lib/hooks/useRDPreview";
+import { useCrossModuleWarnings } from "@/lib/hooks/useCrossModuleWarnings";
+import { GlobalTechTree } from "@/components/rd/GlobalTechTree";
 import { useFeatureFlag } from "@/lib/contexts/ComplexityContext";
 import { TeamState, Product as EngineProduct } from "@/engine/types";
 import type { Patent } from "@/engine/types/patents";
@@ -109,15 +114,20 @@ export default function RDPage({ params }: PageProps) {
     prevSubmittedRef.current = isNowSubmitted;
 
     // Only navigate on fresh submission (transition from not-submitted to submitted)
-    if (!wasSubmitted && isNowSubmitted && rd.newProducts?.length > 0) {
-      const basePath = gameId === "demo" ? "/demo" : `/game/${gameId}`;
-      toast.info("Head to Factory to set up machinery for your new products!", {
-        duration: 5000,
-      });
-      // Small delay so the save toast shows first
-      setTimeout(() => {
-        router.push(`${basePath}/factory?tab=machinery`);
-      }, 1500);
+    if (!wasSubmitted && isNowSubmitted) {
+      // Clear the development queue — products are now submitted to the engine
+      setPendingProducts([]);
+
+      if (rd.newProducts?.length > 0) {
+        const basePath = gameId === "demo" ? "/demo" : `/game/${gameId}`;
+        toast.info("Head to Factory to set up machinery for your new products!", {
+          duration: 5000,
+        });
+        // Small delay so the save toast shows first
+        setTimeout(() => {
+          router.push(`${basePath}/factory?tab=machinery`);
+        }, 1500);
+      }
     }
   }, [submissionStatus.RD?.isSubmitted, rd.newProducts, gameId, router]);
 
@@ -270,6 +280,12 @@ export default function RDPage({ params }: PageProps) {
     }
   }, [teamState?.state]);
 
+  // Cross-module warnings
+  const warnings = useCrossModuleWarnings(state, "rnd");
+
+  // Preview hook for live impact
+  const rdPreview = useRDPreview(state, rd);
+
   // Compute R&D data from state
   const rdData = useMemo(() => {
     if (!state) return defaultRD;
@@ -289,7 +305,11 @@ export default function RDPage({ params }: PageProps) {
         featureSet: p.featureSet,
       }));
 
-    const developingProducts: Product[] = (state.products || [])
+    // Use preview state for developing products if available (shows pending queue products as in_development)
+    const previewProducts = rdPreview.previewState?.products || [];
+    const sourceProducts = previewProducts.length > 0 ? previewProducts : (state.products || []);
+
+    const developingProducts: Product[] = sourceProducts
       .filter((p: EngineProduct) => p.developmentStatus === 'in_development')
       .map((p: EngineProduct) => ({
         id: p.id,
@@ -320,7 +340,7 @@ export default function RDPage({ params }: PageProps) {
       unlockedTechs: state.unlockedTechnologies || [],
       patents: patentList,
     };
-  }, [state]);
+  }, [state, rdPreview.previewState]);
 
   // Get tech tree nodes for ArchetypeCatalog
   const techNodes = useMemo(() => {
@@ -422,6 +442,9 @@ export default function RDPage({ params }: PageProps) {
         iconColor="text-purple-400"
       />
 
+      {/* Cross-module warnings */}
+      <WarningBanner warnings={warnings} />
+
       {/* Notifications */}
       {notifications.length > 0 && (
         <NotificationPanel notifications={notifications} maxVisible={3} />
@@ -475,6 +498,12 @@ export default function RDPage({ params }: PageProps) {
               variant="warning"
             />
           </div>
+
+          {/* Global Tech Tree */}
+          <GlobalTechTree
+            unlockedTechs={state?.unlockedTechnologies ?? []}
+            currentRdPoints={state?.rdPoints ?? 0}
+          />
 
           {/* R&D Investment */}
           <Card className="bg-slate-800/80 border-slate-700/50 backdrop-blur-sm">
@@ -815,6 +844,7 @@ export default function RDPage({ params }: PageProps) {
               allTechNodes={techNodes}
               onSelectArchetype={handleSelectArchetype}
               selectedArchetype={undefined}
+              teamState={state}
             />
           )}
 
@@ -1164,6 +1194,14 @@ export default function RDPage({ params }: PageProps) {
           )}
         </TabsContent>
       </Tabs>
+
+      {/* Decision Impact Preview */}
+      <DecisionImpactPanel
+        moduleName="R&D"
+        costs={rdPreview.costs}
+        messages={rdPreview.messages}
+        cashRemaining={state ? state.cash - rdPreview.costs : undefined}
+      />
 
       {/* Decision Submit Bar */}
       <DecisionSubmitBar module="RD" getDecisions={getDecisions} />

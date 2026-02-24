@@ -280,4 +280,44 @@ export const teamRouter = createTRPCRouter({
       })),
     };
   }),
+
+  /**
+   * Get detailed round results including explainability and module messages
+   */
+  getRoundResults: teamProcedure.query(async ({ ctx }) => {
+    const lastCompletedRound = Math.max(1, ctx.game.currentRound - 1);
+
+    const roundResult = await ctx.prisma.roundResult.findFirst({
+      where: {
+        teamId: ctx.team.id,
+        round: { roundNumber: lastCompletedRound, gameId: ctx.game.id },
+      },
+      include: {
+        round: { select: { roundNumber: true } },
+      },
+    });
+
+    if (!roundResult) return null;
+
+    const metrics = JSON.parse(roundResult.metrics) as Record<string, unknown>;
+    const factoryResults = roundResult.factoryResults ? JSON.parse(roundResult.factoryResults) : null;
+    const hrResults = roundResult.hrResults ? JSON.parse(roundResult.hrResults) : null;
+    const financeResults = roundResult.financeResults ? JSON.parse(roundResult.financeResults) : null;
+    const marketingResults = roundResult.marketingResults ? JSON.parse(roundResult.marketingResults) : null;
+    const rdResults = roundResult.rdResults ? JSON.parse(roundResult.rdResults) : null;
+
+    return {
+      round: roundResult.round.roundNumber,
+      rank: roundResult.rank,
+      metrics,
+      explainability: (metrics.explainability as Record<string, unknown>) ?? null,
+      moduleResults: {
+        factory: factoryResults,
+        hr: hrResults,
+        finance: financeResults,
+        marketing: marketingResults,
+        rd: rdResults,
+      },
+    };
+  }),
 });

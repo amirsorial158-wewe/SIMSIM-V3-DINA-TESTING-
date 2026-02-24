@@ -18,6 +18,11 @@ import { Slider } from "@/components/ui/slider";
 import { trpc } from "@/lib/api/trpc";
 import { useDecisionStore } from "@/lib/stores/decisionStore";
 import { DecisionSubmitBar } from "@/components/game/DecisionSubmitBar";
+import { DecisionImpactPanel } from "@/components/game/DecisionImpactPanel";
+import { WarningBanner } from "@/components/game/WarningBanner";
+import { useFactoryPreview } from "@/lib/hooks/useFactoryPreview";
+import { useCrossModuleWarnings } from "@/lib/hooks/useCrossModuleWarnings";
+import { useMachineryAvailability, type MachineStatus } from "@/lib/hooks/useMachineryAvailability";
 import { useFeatureFlag } from "@/lib/contexts/ComplexityContext";
 import {
   Factory,
@@ -82,6 +87,7 @@ import {
 import { toast } from "sonner";
 import { getArchetype } from "@/engine/types/archetypes";
 import { getMachineryRequirements, type MachineryRequirement } from "@/engine/types/machineryRequirements";
+import { MACHINE_CONFIGS, type Machine } from "@/engine/machinery";
 
 interface PageProps {
   params: Promise<{ gameId: string }>;
@@ -414,6 +420,10 @@ export default function FactoryPage({ params }: PageProps) {
     prevFactorySubmittedRef.current = isNowSubmitted;
 
     if (!wasSubmitted && isNowSubmitted) {
+      // Clear pending purchases — they are now submitted to the engine
+      setUpgradePurchases([]);
+      setNewFactories([]);
+
       const basePath = gameId === "demo" ? "/demo" : `/game/${gameId}`;
       toast.info("Factory saved! Head to Finance to set pricing and review your budget.", {
         duration: 5000,
@@ -521,6 +531,18 @@ export default function FactoryPage({ params }: PageProps) {
     }
   }, [teamState?.state]);
 
+  // Cross-module warnings
+  const warnings = useCrossModuleWarnings(state, "factory");
+
+  // Preview hook for live impact
+  const factoryPreview = useFactoryPreview(state, {
+    efficiencyInvestment,
+    esgInvestment,
+    productionAllocations,
+    upgradePurchases,
+    newFactories,
+  });
+
   // Get factories from state or use default
   const factories = state?.factories || [defaultFactory];
   const selectedFactory = factories[selectedFactoryIndex] || defaultFactory;
@@ -555,6 +577,14 @@ export default function FactoryPage({ params }: PageProps) {
       return { ...req, installed: !!installed, pending, productNames };
     });
   }, [rd.newProducts, upgradePurchases, selectedFactory.upgrades, selectedFactory.id]);
+
+  // Machinery availability from R&D level / material tier
+  const machineStatuses = useMachineryAvailability(state);
+  const machineStatusMap = useMemo(() => {
+    const map = new Map<string, MachineStatus>();
+    for (const ms of machineStatuses) map.set(ms.machineType, ms);
+    return map;
+  }, [machineStatuses]);
 
   // Calculate equipment health metrics
   const equipmentHealth = useMemo(() => {
@@ -700,16 +730,24 @@ export default function FactoryPage({ params }: PageProps) {
     });
   };
 
-  // Check if an upgrade is already purchased or pending
+  // Check if an upgrade/machine is already purchased or pending
   const isUpgradePurchased = (upgradeId: string) => {
+    // Check factory upgrades
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const installed = selectedFactory.upgrades?.includes(upgradeId as any);
+    const installedUpgrade = selectedFactory.upgrades?.includes(upgradeId as any);
+    // Check owned machines in machinery state
+    const ownedMachines = state?.machineryStates?.[selectedFactory.id]?.machines ?? [];
+    const installedMachine = ownedMachines.some(m => m.type === upgradeId);
+    const installed = installedUpgrade || installedMachine;
     const pending = upgradePurchases.some(u => u.factoryId === selectedFactory.id && u.upgradeName === upgradeId);
     return { installed, pending };
   };
 
-  // Toggle upgrade purchase
+  // Toggle upgrade purchase (prevents buying already-owned machines)
   const toggleUpgradePurchase = (upgradeId: string) => {
+    const { installed } = isUpgradePurchased(upgradeId);
+    if (installed) return; // Already owned — don't allow re-purchase
+
     const pending = upgradePurchases.some(u => u.factoryId === selectedFactory.id && u.upgradeName === upgradeId);
     if (pending) {
       setUpgradePurchases(prev => prev.filter(u => !(u.factoryId === selectedFactory.id && u.upgradeName === upgradeId)));
@@ -777,6 +815,9 @@ export default function FactoryPage({ params }: PageProps) {
           )
         }
       />
+
+      {/* Cross-module warnings */}
+      <WarningBanner warnings={warnings} />
 
       {/* Factory Selector */}
       <div className="flex gap-2 flex-wrap">
@@ -1370,6 +1411,100 @@ export default function FactoryPage({ params }: PageProps) {
             </CardContent>
           </Card>
 
+          {/* Factory Machinery (in production context) */}
+          {(() => {
+            const previewMachines = factoryPreview.previewState?.machineryStates?.[selectedFactory.id]?.machines ?? [];
+            const savedMachines = state?.machineryStates?.[selectedFactory.id]?.machines ?? [];
+            const machines = previewMachines.length > 0 ? previewMachines : savedMachines;
+            const pendingMachinePurchases = upgradePurchases.filter(u => u.factoryId === selectedFactory.id);
+            const productionMachines = machines.filter((m: Machine) => m.capacityUnits > 0);
+            const utilityMachines = machines.filter((m: Machine) => m.capacityUnits === 0);
+            const machineCapacity = machines.reduce((sum, m: Machine) => sum + (m.status === "operational" ? m.capacityUnits : 0), 0);
+
+            return (
+              <Card className="bg-slate-800 border-slate-700">
+                <CardHeader>
+                  <CardTitle className="text-white flex items-center gap-2">
+                    <Cog className="w-5 h-5 text-cyan-400" />
+                    Factory Machinery
+                    {machines.length > 0 && (
+                      <Badge className="bg-cyan-500/20 text-cyan-400 text-xs ml-auto">
+                        {machines.length} machine(s) · {formatNumber(machineCapacity)} units capacity
+                      </Badge>
+                    )}
+                  </CardTitle>
+                  <CardDescription className="text-slate-400">
+                    Machines powering your production lines
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {machines.length === 0 && pendingMachinePurchases.length === 0 ? (
+                    <div className="text-center py-6 text-slate-400">
+                      <Cog className="w-10 h-10 mx-auto mb-3 opacity-50" />
+                      <p>No machinery installed</p>
+                      <p className="text-sm mt-1">
+                        Go to the <button className="text-cyan-400 underline" onClick={() => setActiveTab("machinery")}>Machinery tab</button> to purchase machines
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {productionMachines.length > 0 && (
+                        <div>
+                          <p className="text-slate-400 text-xs uppercase tracking-wider mb-2">Production Machines</p>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            {productionMachines.map((machine: Machine) => (
+                              <div key={machine.id} className="flex justify-between items-center p-3 bg-slate-700/50 rounded-lg">
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <p className="text-white text-sm font-medium">{machine.name}</p>
+                                    <Badge className={`text-[10px] ${
+                                      machine.status === "operational" ? "bg-green-500/20 text-green-400" :
+                                      machine.status === "breakdown" ? "bg-red-500/20 text-red-400" :
+                                      "bg-yellow-500/20 text-yellow-400"
+                                    }`}>{machine.status}</Badge>
+                                  </div>
+                                  <p className="text-slate-400 text-xs mt-0.5">
+                                    {formatNumber(machine.capacityUnits)} units · {machine.healthPercent}% health
+                                  </p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {utilityMachines.length > 0 && (
+                        <div>
+                          <p className="text-slate-400 text-xs uppercase tracking-wider mb-2">Quality & Utility</p>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            {utilityMachines.map((machine: Machine) => (
+                              <div key={machine.id} className="flex justify-between items-center p-3 bg-slate-700/50 rounded-lg">
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <p className="text-white text-sm font-medium">{machine.name}</p>
+                                    <Badge className={`text-[10px] ${
+                                      machine.status === "operational" ? "bg-green-500/20 text-green-400" :
+                                      machine.status === "breakdown" ? "bg-red-500/20 text-red-400" :
+                                      "bg-yellow-500/20 text-yellow-400"
+                                    }`}>{machine.status}</Badge>
+                                  </div>
+                                  <p className="text-slate-400 text-xs mt-0.5">
+                                    {machine.defectRateImpact < 0 ? `${(Math.abs(machine.defectRateImpact) * 100).toFixed(1)}% defect reduction` : ""}
+                                    {machine.laborReduction ? `${machine.laborReduction > 0 && machine.defectRateImpact < 0 ? " · " : ""}${(machine.laborReduction * 100).toFixed(0)}% labor reduction` : ""}
+                                    {machine.shippingReduction ? `${(machine.shippingReduction * 100).toFixed(0)}% shipping reduction` : ""}
+                                  </p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })()}
+
           {/* Production Lines Detail */}
           <Card className="bg-slate-800 border-slate-700">
             <CardHeader>
@@ -1936,32 +2071,43 @@ export default function FactoryPage({ params }: PageProps) {
             )}
 
             {/* Machine Stats */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <StatCard
-                label="Total Machines"
-                value="0"
-                icon={<Cog className="w-5 h-5" />}
-                variant="default"
-              />
-              <StatCard
-                label="Total Capacity"
-                value="0 units"
-                icon={<Package className="w-5 h-5" />}
-                variant="default"
-              />
-              <StatCard
-                label="Maintenance Cost"
-                value="$0/round"
-                icon={<Wrench className="w-5 h-5" />}
-                variant="warning"
-              />
-              <StatCard
-                label="Operating Cost"
-                value="$0/round"
-                icon={<DollarSign className="w-5 h-5" />}
-                variant="info"
-              />
-            </div>
+            {(() => {
+              const previewMachinery = factoryPreview.previewState?.machineryStates?.[selectedFactory.id];
+              const baseMachinery = state?.machineryStates?.[selectedFactory.id];
+              const machineryState = previewMachinery ?? baseMachinery;
+              const totalMachines = machineryState?.machines?.length ?? 0;
+              const totalCapacity = machineryState?.totalCapacity ?? 0;
+              const maintenanceCost = machineryState?.totalMaintenanceCost ?? 0;
+              const operatingCost = machineryState?.totalOperatingCost ?? 0;
+              return (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <StatCard
+                    label="Total Machines"
+                    value={`${totalMachines}`}
+                    icon={<Cog className="w-5 h-5" />}
+                    variant="default"
+                  />
+                  <StatCard
+                    label="Total Capacity"
+                    value={`${formatNumber(totalCapacity)} units`}
+                    icon={<Package className="w-5 h-5" />}
+                    variant="default"
+                  />
+                  <StatCard
+                    label="Maintenance Cost"
+                    value={`${formatCurrency(maintenanceCost)}/round`}
+                    icon={<Wrench className="w-5 h-5" />}
+                    variant="warning"
+                  />
+                  <StatCard
+                    label="Operating Cost"
+                    value={`${formatCurrency(operatingCost)}/round`}
+                    icon={<DollarSign className="w-5 h-5" />}
+                    variant="info"
+                  />
+                </div>
+              );
+            })()}
 
             {/* Machine Categories */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1985,16 +2131,27 @@ export default function FactoryPage({ params }: PageProps) {
                     { name: "Laser Cutter", cost: "$6M", capacity: "4,000 units", type: "laser_cutter" },
                   ].map((machine) => {
                     const { installed, pending } = isUpgradePurchased(machine.type);
+                    const status = machineStatusMap.get(machine.type);
+                    const isLocked = status && status.availability.startsWith("locked_");
+                    const isNotRelevant = status?.availability === "not_relevant";
                     return (
-                      <div key={machine.type} className="flex justify-between items-center p-3 bg-slate-700/50 rounded-lg">
+                      <div key={machine.type} className={`flex justify-between items-center p-3 rounded-lg ${isLocked ? "bg-slate-700/30 opacity-60" : isNotRelevant ? "bg-slate-700/20 opacity-40" : "bg-slate-700/50"}`}>
                         <div>
                           <p className="text-white font-medium">{machine.name}</p>
                           <p className="text-slate-400 text-sm">{machine.capacity}</p>
+                          {isLocked && status?.reason && (
+                            <p className="text-amber-400/80 text-xs mt-0.5">{status.reason}</p>
+                          )}
+                          {isNotRelevant && (
+                            <p className="text-slate-500 text-xs mt-0.5">Not needed for current segments</p>
+                          )}
                         </div>
                         <div className="text-right">
                           <p className="text-emerald-400 font-medium">{machine.cost}</p>
                           {installed ? (
                             <Badge className="mt-1 bg-green-500/20 text-green-400 text-xs">Owned</Badge>
+                          ) : isLocked ? (
+                            <Badge className="mt-1 bg-amber-500/20 text-amber-400 text-xs">Locked</Badge>
                           ) : (
                             <Button
                               size="sm"
@@ -2033,16 +2190,27 @@ export default function FactoryPage({ params }: PageProps) {
                     { name: "Forklift Fleet", cost: "$1M", benefit: "-10% shipping", type: "forklift_fleet" },
                   ].map((machine) => {
                     const { installed, pending } = isUpgradePurchased(machine.type);
+                    const status = machineStatusMap.get(machine.type);
+                    const isLocked = status && status.availability.startsWith("locked_");
+                    const isNotRelevant = status?.availability === "not_relevant";
                     return (
-                      <div key={machine.type} className="flex justify-between items-center p-3 bg-slate-700/50 rounded-lg">
+                      <div key={machine.type} className={`flex justify-between items-center p-3 rounded-lg ${isLocked ? "bg-slate-700/30 opacity-60" : isNotRelevant ? "bg-slate-700/20 opacity-40" : "bg-slate-700/50"}`}>
                         <div>
                           <p className="text-white font-medium">{machine.name}</p>
                           <p className="text-slate-400 text-sm">{machine.benefit}</p>
+                          {isLocked && status?.reason && (
+                            <p className="text-amber-400/80 text-xs mt-0.5">{status.reason}</p>
+                          )}
+                          {isNotRelevant && (
+                            <p className="text-slate-500 text-xs mt-0.5">Not needed for current segments</p>
+                          )}
                         </div>
                         <div className="text-right">
                           <p className="text-emerald-400 font-medium">{machine.cost}</p>
                           {installed ? (
                             <Badge className="mt-1 bg-green-500/20 text-green-400 text-xs">Owned</Badge>
+                          ) : isLocked ? (
+                            <Badge className="mt-1 bg-amber-500/20 text-amber-400 text-xs">Locked</Badge>
                           ) : (
                             <Button
                               size="sm"
@@ -2061,6 +2229,65 @@ export default function FactoryPage({ params }: PageProps) {
               </Card>
             </div>
 
+            {/* Pending Purchases */}
+            {upgradePurchases.filter(u => u.factoryId === selectedFactory.id).length > 0 && (
+              <Card className="bg-slate-800 border-green-700/50">
+                <CardHeader>
+                  <CardTitle className="text-lg text-white flex items-center gap-2">
+                    <ShoppingCart className="w-5 h-5 text-green-400" />
+                    Pending Purchases
+                    <Badge className="bg-green-500/20 text-green-400 text-xs ml-auto">
+                      {upgradePurchases.filter(u => u.factoryId === selectedFactory.id).length} machine(s)
+                    </Badge>
+                  </CardTitle>
+                  <CardDescription>Machines that will be purchased when you save decisions</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {upgradePurchases
+                    .filter(u => u.factoryId === selectedFactory.id)
+                    .map((purchase, idx) => {
+                      const cfg = MACHINE_CONFIGS.find(c => c.type === purchase.upgradeName);
+                      return (
+                        <div key={idx} className="flex justify-between items-center p-3 bg-green-900/20 border border-green-700/30 rounded-lg">
+                          <div>
+                            <p className="text-white font-medium">{cfg?.name ?? purchase.upgradeName}</p>
+                            <p className="text-slate-400 text-sm">
+                              {cfg?.baseCapacity ? `${formatNumber(cfg.baseCapacity)} units capacity` : "Utility machine"}
+                              {cfg?.defectRateReduction ? ` · -${(cfg.defectRateReduction * 100).toFixed(0)}% defects` : ""}
+                              {cfg?.laborReduction ? ` · -${(cfg.laborReduction * 100).toFixed(0)}% labor` : ""}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <p className="text-emerald-400 font-medium">{formatCurrency(cfg?.baseCost ?? 0)}</p>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              className="h-7 text-xs"
+                              onClick={() => toggleUpgradePurchase(purchase.upgradeName)}
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  <div className="flex justify-between items-center pt-2 border-t border-slate-700">
+                    <p className="text-slate-400 text-sm font-medium">Total Purchase Cost</p>
+                    <p className="text-emerald-400 font-bold">
+                      {formatCurrency(
+                        upgradePurchases
+                          .filter(u => u.factoryId === selectedFactory.id)
+                          .reduce((sum, u) => {
+                            const cfg = MACHINE_CONFIGS.find(c => c.type === u.upgradeName);
+                            return sum + (cfg?.baseCost ?? 0);
+                          }, 0)
+                      )}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Owned Machines */}
             <Card className="bg-slate-800 border-slate-700">
               <CardHeader>
@@ -2071,11 +2298,50 @@ export default function FactoryPage({ params }: PageProps) {
                 <CardDescription>Your factory&apos;s current machinery</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="text-center py-8 text-slate-400">
-                  <Cog className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                  <p>No machines purchased yet</p>
-                  <p className="text-sm mt-2">Purchase machines above to increase production capacity</p>
-                </div>
+                {(() => {
+                  // Only show machines that are actually owned (saved state), NOT pending purchases from preview
+                  const machines = state?.machineryStates?.[selectedFactory.id]?.machines ?? [];
+                  if (machines.length === 0) {
+                    return (
+                      <div className="text-center py-8 text-slate-400">
+                        <Cog className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                        <p>No machines owned yet</p>
+                        <p className="text-sm mt-2">Purchase machines above and save decisions to add them to your factory</p>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="space-y-2">
+                      {machines.map((machine: Machine) => (
+                        <div key={machine.id} className="flex justify-between items-center p-3 bg-slate-700/50 rounded-lg">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <p className="text-white font-medium">{machine.name}</p>
+                              <Badge className={`text-xs ${
+                                machine.status === "operational" ? "bg-green-500/20 text-green-400" :
+                                machine.status === "maintenance" ? "bg-yellow-500/20 text-yellow-400" :
+                                machine.status === "breakdown" ? "bg-red-500/20 text-red-400" :
+                                "bg-slate-500/20 text-slate-400"
+                              }`}>
+                                {machine.status}
+                              </Badge>
+                            </div>
+                            <div className="flex gap-4 mt-1 text-xs text-slate-400">
+                              {machine.capacityUnits > 0 && <span>{formatNumber(machine.capacityUnits)} units</span>}
+                              <span>Health: {machine.healthPercent}%</span>
+                              <span>Age: {machine.ageRounds} rounds</span>
+                              <span>Maint: {formatCurrency(machine.maintenanceCostPerRound)}/rd</span>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-slate-400 text-sm">{formatCurrency(machine.currentValue)}</p>
+                            <p className="text-xs text-slate-500">current value</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
               </CardContent>
             </Card>
 
@@ -2089,11 +2355,55 @@ export default function FactoryPage({ params }: PageProps) {
                 <CardDescription>Schedule preventive maintenance for your machines</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="text-center py-8 text-slate-400">
-                  <Wrench className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                  <p>No machines to maintain</p>
-                  <p className="text-sm mt-2">Machines will appear here once purchased</p>
-                </div>
+                {(() => {
+                  const previewMachines = factoryPreview.previewState?.machineryStates?.[selectedFactory.id]?.machines ?? [];
+                  const savedMachines = state?.machineryStates?.[selectedFactory.id]?.machines ?? [];
+                  const machines = previewMachines.length > 0 ? previewMachines : savedMachines;
+                  if (machines.length === 0) {
+                    return (
+                      <div className="text-center py-8 text-slate-400">
+                        <Wrench className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                        <p>No machines to maintain</p>
+                        <p className="text-sm mt-2">Machines will appear here once purchased</p>
+                      </div>
+                    );
+                  }
+                  const needsMaintenance = machines.filter(
+                    (m: Machine) => m.healthPercent < 70 || m.status === "maintenance" || m.status === "breakdown"
+                  );
+                  return (
+                    <div className="space-y-2">
+                      {needsMaintenance.length > 0 ? (
+                        needsMaintenance.map((machine: Machine) => (
+                          <div key={machine.id} className="flex justify-between items-center p-3 bg-yellow-900/20 border border-yellow-700/30 rounded-lg">
+                            <div>
+                              <p className="text-white font-medium">{machine.name}</p>
+                              <p className="text-yellow-400 text-xs">
+                                {machine.status === "breakdown" ? "Broken down — needs repair" :
+                                 machine.status === "maintenance" ? "Currently under maintenance" :
+                                 `Health at ${machine.healthPercent}% — maintenance recommended`}
+                              </p>
+                            </div>
+                            <Badge className={`text-xs ${
+                              machine.status === "breakdown" ? "bg-red-500/20 text-red-400" :
+                              machine.healthPercent < 50 ? "bg-orange-500/20 text-orange-400" :
+                              "bg-yellow-500/20 text-yellow-400"
+                            }`}>
+                              {machine.status === "breakdown" ? "Urgent" :
+                               machine.healthPercent < 50 ? "High Priority" : "Recommended"}
+                            </Badge>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="text-center py-6 text-slate-400">
+                          <CheckCircle2 className="w-10 h-10 mx-auto mb-3 text-green-400/50" />
+                          <p className="text-green-400/80">All machines in good condition</p>
+                          <p className="text-sm mt-1">{machines.length} machine(s) operational</p>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </CardContent>
             </Card>
           </motion.div>
@@ -3184,6 +3494,14 @@ export default function FactoryPage({ params }: PageProps) {
           </motion.div>
         </TabsContent>
       </Tabs>
+
+      {/* Decision Impact Preview */}
+      <DecisionImpactPanel
+        moduleName="Factory"
+        costs={factoryPreview.costs}
+        messages={factoryPreview.messages}
+        cashRemaining={state ? state.cash - factoryPreview.costs : undefined}
+      />
 
       {/* Decision Submit Bar */}
       <DecisionSubmitBar

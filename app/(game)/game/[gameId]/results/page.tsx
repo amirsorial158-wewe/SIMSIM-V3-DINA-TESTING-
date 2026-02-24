@@ -6,9 +6,12 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { trpc } from "@/lib/api/trpc";
-import { MetricLineChart, MetricBarChart, MarketSharePieChart } from "@/components/charts";
+import { MetricLineChart, MetricBarChart, MarketSharePieChart, WaterfallChart, SegmentRadarChart, CompetitiveScorecard } from "@/components/charts";
 import { RoundResultsCard } from "@/components/game/RoundResultsCard";
 import { TeamRankingsCard } from "@/components/game/TeamRankingsCard";
+import { RoundNarrativeCard } from "@/components/game/RoundNarrativeCard";
+import { ModuleResultCard } from "@/components/game/ModuleResultCard";
+import { AchievementUnlockedCard } from "@/components/game/AchievementUnlockedCard";
 import { TeamState } from "@/engine/types";
 import {
   Trophy,
@@ -22,6 +25,7 @@ import {
   DollarSign,
   Package,
   Activity,
+  Radar,
 } from "lucide-react";
 
 interface PageProps {
@@ -33,6 +37,7 @@ export default function ResultsPage({ params }: PageProps) {
 
   const { data: teamState, isLoading: isLoadingTeam } = trpc.team.getMyState.useQuery();
   const { data: performanceData, isLoading: isLoadingPerformance } = trpc.team.getPerformanceHistory.useQuery();
+  const { data: roundResults } = trpc.team.getRoundResults.useQuery();
 
   const isLoading = isLoadingTeam || isLoadingPerformance;
 
@@ -183,6 +188,62 @@ export default function ResultsPage({ params }: PageProps) {
     }));
   }, [state?.marketShare]);
 
+  // Explainability-based chart data
+  const explainability = roundResults?.explainability as {
+    profitDriverTree?: { waterfallSteps?: { label: string; value: number; type: string }[] };
+    segmentBreakdowns?: {
+      segment: string;
+      scores: Record<string, number>;
+      totalScore: number;
+      rank: number;
+      marketShare: number;
+      competitorComparison?: { teamId: string; teamName: string; score: number; rank: number; marketShare: number }[];
+    }[];
+  } | null;
+
+  const waterfallItems = useMemo(() => {
+    const steps = explainability?.profitDriverTree?.waterfallSteps;
+    if (!steps?.length) return null;
+    return steps.map((s) => ({
+      name: s.label,
+      value: s.value,
+      type: (s.type === "decrease" ? "negative" : s.type === "total" ? "total" : "positive") as "positive" | "negative" | "total",
+    }));
+  }, [explainability?.profitDriverTree?.waterfallSteps]);
+
+  const radarData = useMemo(() => {
+    const breakdowns = explainability?.segmentBreakdowns;
+    if (!breakdowns?.length) return null;
+    // Average scores across all segments for a single radar
+    const dims = ["price", "quality", "brand", "esg", "features"] as const;
+    return dims.map((d) => ({
+      subject: d.charAt(0).toUpperCase() + d.slice(1),
+      value: breakdowns.reduce((sum, b) => sum + (b.scores[d] || 0), 0) / breakdowns.length,
+      fullMark: 100,
+    }));
+  }, [explainability?.segmentBreakdowns]);
+
+  const scorecardData = useMemo(() => {
+    const breakdowns = explainability?.segmentBreakdowns;
+    if (!breakdowns?.length) return null;
+    const totalTeamsCount = breakdowns[0]?.competitorComparison?.length
+      ? breakdowns[0].competitorComparison.length + 1
+      : rankings.length || totalTeamsFromHistory;
+    return {
+      scores: breakdowns.map((b) => ({
+        segment: b.segment,
+        score: b.totalScore,
+        rank: b.rank,
+        totalTeams: totalTeamsCount,
+        marketShare: b.marketShare,
+      })),
+      overallRank: historyData.length > 0 ? historyData[historyData.length - 1].rank : 0,
+      totalTeams: totalTeamsCount,
+    };
+  }, [explainability?.segmentBreakdowns, rankings.length, historyData]);
+
+  const totalTeamsFromHistory = historyData.length > 0 ? rankings.length : 0;
+
   // Loading state
   if (isLoading) {
     return (
@@ -260,6 +321,64 @@ export default function ResultsPage({ params }: PageProps) {
             />
           )}
 
+          {/* Achievement Unlocks */}
+          {state?.achievements && state.achievements.length > 0 && roundResults && (
+            <AchievementUnlockedCard
+              achievements={state.achievements}
+              currentRound={roundResults.round}
+              totalScore={state.achievementScore}
+            />
+          )}
+
+          {/* Round Narrative from ExplainabilityEngine */}
+          {roundResults?.explainability && (
+            <RoundNarrativeCard
+              narrative={(roundResults.explainability as { narrative?: { headline: string; summary: string; keyHighlights: { title: string; description: string }[]; concerns: { title: string; description: string }[]; recommendations: { title: string; description: string }[] } })?.narrative ?? null}
+              round={roundResults.round}
+            />
+          )}
+
+          {/* Per-Module Results */}
+          {roundResults?.moduleResults && (
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {roundResults.moduleResults.factory?.messages?.length > 0 && (
+                <ModuleResultCard
+                  moduleId="factory"
+                  messages={roundResults.moduleResults.factory.messages}
+                  costs={roundResults.moduleResults.factory.costs}
+                />
+              )}
+              {roundResults.moduleResults.hr?.messages?.length > 0 && (
+                <ModuleResultCard
+                  moduleId="hr"
+                  messages={roundResults.moduleResults.hr.messages}
+                  costs={roundResults.moduleResults.hr.costs}
+                />
+              )}
+              {roundResults.moduleResults.finance?.messages?.length > 0 && (
+                <ModuleResultCard
+                  moduleId="finance"
+                  messages={roundResults.moduleResults.finance.messages}
+                  costs={roundResults.moduleResults.finance.costs}
+                />
+              )}
+              {roundResults.moduleResults.marketing?.messages?.length > 0 && (
+                <ModuleResultCard
+                  moduleId="marketing"
+                  messages={roundResults.moduleResults.marketing.messages}
+                  costs={roundResults.moduleResults.marketing.costs}
+                />
+              )}
+              {roundResults.moduleResults.rd?.messages?.length > 0 && (
+                <ModuleResultCard
+                  moduleId="rd"
+                  messages={roundResults.moduleResults.rd.messages}
+                  costs={roundResults.moduleResults.rd.costs}
+                />
+              )}
+            </div>
+          )}
+
           {/* Tabbed Chart Views */}
           <Tabs defaultValue="financial" className="w-full">
             <TabsList className="bg-slate-800 border-slate-700">
@@ -279,6 +398,12 @@ export default function ResultsPage({ params }: PageProps) {
                 <BarChart3 className="w-4 h-4 mr-2" />
                 Round Comparison
               </TabsTrigger>
+              {(waterfallItems || radarData || scorecardData) && (
+                <TabsTrigger value="analysis" className="data-[state=active]:bg-slate-700">
+                  <Radar className="w-4 h-4 mr-2" />
+                  Deep Analysis
+                </TabsTrigger>
+              )}
             </TabsList>
 
             <TabsContent value="financial" className="mt-4">
@@ -422,7 +547,7 @@ export default function ResultsPage({ params }: PageProps) {
                       <div className="p-3 bg-slate-700/50 rounded-lg">
                         <div className="text-slate-400 text-sm">Patents</div>
                         <div className="text-xl font-bold text-yellow-400">
-                          {operationalMetrics?.patents || 0}
+                          {Array.isArray(operationalMetrics?.patents) ? operationalMetrics.patents.length : (operationalMetrics?.patents || 0)}
                         </div>
                       </div>
                     </div>
@@ -506,6 +631,39 @@ export default function ResultsPage({ params }: PageProps) {
                 </CardContent>
               </Card>
             </TabsContent>
+
+            {(waterfallItems || radarData || scorecardData) && (
+              <TabsContent value="analysis" className="mt-4">
+                <div className="space-y-6">
+                  {waterfallItems && (
+                    <WaterfallChart
+                      items={waterfallItems}
+                      title="Profit Waterfall"
+                      description="Revenue and cost components driving your bottom line"
+                      height={350}
+                    />
+                  )}
+                  <div className="grid md:grid-cols-2 gap-6">
+                    {radarData && (
+                      <SegmentRadarChart
+                        data={radarData}
+                        title="Average Score Radar"
+                        description="Your average scores across market dimensions"
+                        height={300}
+                      />
+                    )}
+                    {scorecardData && (
+                      <CompetitiveScorecard
+                        scores={scorecardData.scores}
+                        teamName={teamState?.team.name || "Your Team"}
+                        overallRank={scorecardData.overallRank}
+                        totalTeams={scorecardData.totalTeams}
+                      />
+                    )}
+                  </div>
+                </div>
+              </TabsContent>
+            )}
           </Tabs>
 
           {/* Team Rankings */}

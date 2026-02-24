@@ -274,8 +274,8 @@ export default function OverviewPage({ params }: PageProps) {
       <ESGNotification esgScore={companyState?.esgScore || 0} />
 
       {/* Key Metrics Grid - Enhanced with StatCard */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div data-testid="stat-cash">
+      <div id="hud-metrics-grid" className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div data-testid="stat-cash" id="hud-cash-display">
           <StatCard
             label="Cash"
             value={formatCurrency(companyState?.cash || 0)}
@@ -441,7 +441,7 @@ export default function OverviewPage({ params }: PageProps) {
       </div>
 
       {/* Operations Summary */}
-      <div className="grid md:grid-cols-2 gap-6">
+      <div id="production-queue-section" className="grid md:grid-cols-2 gap-6">
         <Card className="bg-slate-800 border-slate-700">
           <CardHeader>
             <CardTitle className="text-white flex items-center gap-2">

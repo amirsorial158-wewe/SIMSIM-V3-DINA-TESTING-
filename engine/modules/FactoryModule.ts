@@ -173,50 +173,66 @@ export class FactoryModule {
     }
 
     // Process machinery decisions
-    if (decisions.machineryDecisions) {
-      for (const factoryId of Object.keys(decisions.machineryDecisions)) {
+    if (decisions.machineryDecisions && ctx) {
+      const machineryDec = decisions.machineryDecisions;
+
+      // Initialize machinery states if not present
+      if (!newState.machineryStates) {
+        newState.machineryStates = {};
+      }
+
+      // Collect all existing machines across factories
+      const allMachines: import("../machinery/types").Machine[] = [];
+      for (const fms of Object.values(newState.machineryStates)) {
+        allMachines.push(...fms.machines);
+      }
+
+      // Also ensure factory IDs from purchases have initialized state
+      if (machineryDec.purchases) {
+        for (const purchase of machineryDec.purchases) {
+          if (!newState.machineryStates[purchase.factoryId]) {
+            newState.machineryStates[purchase.factoryId] = {
+              machines: [],
+              totalCapacity: 0,
+              totalMaintenanceCost: 0,
+              totalOperatingCost: 0,
+              averageHealth: 100,
+              machinesByType: {} as Record<import("../machinery/types").MachineType, number>,
+              breakdownsThisRound: [],
+              scheduledMaintenanceThisRound: [],
+            };
+          }
+        }
+      }
+
+      // Process using MachineryEngine (expects Machine[] not FactoryMachineryState)
+      const machineryResult = MachineryEngine.process(
+        allMachines,
+        machineryDec,
+        newState.round,
+        ctx
+      );
+
+      // Update machinery states from result (Map<string, FactoryMachineryState>)
+      for (const [factoryId, factoryMachineryState] of machineryResult.factoryStates) {
+        newState.machineryStates[factoryId] = factoryMachineryState;
+      }
+
+      // Apply machinery costs
+      totalCosts += machineryResult.totalCosts;
+
+      // Apply machinery effects to factories
+      for (const [factoryId, fms] of Object.entries(newState.machineryStates)) {
         const factory = newState.factories.find(f => f.id === factoryId);
-        if (!factory) continue;
-
-        const factoryDecisions = decisions.machineryDecisions[factoryId];
-        if (!factoryDecisions) continue;
-
-        // Initialize machinery state if not present
-        if (!newState.machineryStates) {
-          newState.machineryStates = {};
+        if (factory && fms.machines.length > 0) {
+          const defectReduction = fms.machines.reduce((sum, m) => sum + Math.abs(m.defectRateImpact), 0);
+          factory.defectRate = Math.max(0, (factory.defectRate ?? 0) - defectReduction);
         }
-        if (!newState.machineryStates[factoryId]) {
-          newState.machineryStates[factoryId] = {
-            machines: [],
-            totalCapacity: 0,
-            totalMaintenanceCost: 0,
-            totalOperatingCost: 0,
-            defectRateReduction: 0,
-            laborReduction: 0,
-            shippingReduction: 0,
-          };
-        }
+      }
 
-        const machineryState = newState.machineryStates[factoryId];
-
-        // Process machinery using MachineryEngine
-        const machineryResult = MachineryEngine.process(
-          machineryState,
-          factoryDecisions,
-          newState.round,
-          ctx
-        );
-
-        // Update machinery state
-        newState.machineryStates[factoryId] = machineryResult.newState;
-
-        // Apply machinery costs
-        totalCosts += machineryResult.result.costs;
-
-        // Apply machinery effects to factory
-        factory.defectRate = Math.max(0, factory.defectRate - machineryResult.newState.defectRateReduction);
-
-        messages.push(...machineryResult.result.messages);
+      messages.push(...machineryResult.messages);
+      if (machineryResult.warnings.length > 0) {
+        messages.push(...machineryResult.warnings);
       }
     }
 
@@ -770,6 +786,65 @@ export class FactoryModule {
     }
 
     return Math.min(0.25, penalty); // Cap at 25% total penalty
+  }
+
+  /**
+   * Calculate waste metrics for a production run.
+   * Each factory generates waste proportional to production volume and inversely to efficiency.
+   * Waste disposal costs are deducted from profits.
+   */
+  static calculateWasteMetrics(
+    factories: Factory[],
+    productionByFactory: Record<string, number>
+  ): {
+    totalWasteUnits: number;
+    wasteDisposalCost: number;
+    efficiencyRating: number;
+    wasteByFactory: Record<string, { units: number; cost: number; efficiency: number }>;
+  } {
+    let totalWasteUnits = 0;
+    let totalWasteDisposalCost = 0;
+    let totalEfficiency = 0;
+    const wasteByFactory: Record<string, { units: number; cost: number; efficiency: number }> = {};
+
+    for (const factory of factories) {
+      const produced = productionByFactory[factory.id] ?? 0;
+      if (produced === 0) {
+        wasteByFactory[factory.id] = { units: 0, cost: 0, efficiency: 100 };
+        totalEfficiency += 100;
+        continue;
+      }
+
+      // Waste rate inversely proportional to efficiency (higher efficiency = less waste)
+      const baseWasteRate = 0.15; // 15% baseline waste
+      const efficiencyReduction = factory.efficiency * 0.12; // Up to 12% reduction at max efficiency
+      const upgradeReduction = (factory.wasteCostReduction ?? 0) * 0.05; // wasteToEnergy upgrade
+      const wasteRate = Math.max(0.02, baseWasteRate - efficiencyReduction - upgradeReduction);
+
+      const wasteUnits = Math.floor(produced * wasteRate);
+      const disposalCostPerUnit = 5; // $5 per wasted unit
+      const wasteDisposalCost = wasteUnits * disposalCostPerUnit;
+      const factoryEfficiency = Math.round((1 - wasteRate) * 100);
+
+      wasteByFactory[factory.id] = {
+        units: wasteUnits,
+        cost: wasteDisposalCost,
+        efficiency: factoryEfficiency,
+      };
+
+      totalWasteUnits += wasteUnits;
+      totalWasteDisposalCost += wasteDisposalCost;
+      totalEfficiency += factoryEfficiency;
+    }
+
+    const avgEfficiency = factories.length > 0 ? Math.round(totalEfficiency / factories.length) : 100;
+
+    return {
+      totalWasteUnits,
+      wasteDisposalCost: totalWasteDisposalCost,
+      efficiencyRating: avgEfficiency,
+      wasteByFactory,
+    };
   }
 
   /**

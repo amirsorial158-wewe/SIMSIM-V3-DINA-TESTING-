@@ -166,4 +166,63 @@ export interface TeamState {
 
   // Machinery states per factory
   machineryStates?: Record<string, FactoryMachineryState>;
+
+  // === Phase 6: New Game Mechanics ===
+
+  /** Waste & efficiency tracking per factory per round */
+  wasteMetrics?: {
+    totalWasteUnits: number;
+    wasteDisposalCost: number;
+    efficiencyRating: number;  // 0-100 percentage
+    wasteByFactory: Record<string, { units: number; cost: number; efficiency: number }>;
+  };
+
+  /** Customer loyalty per segment (0-100). Consistent supply builds loyalty. */
+  customerLoyalty?: Record<Segment, number>;
+
+  /** Active contract orders from NPC buyers */
+  activeContracts?: ContractOrder[];
+
+  /** Active research track for this round (only one allowed per round) */
+  activeResearchTrack?: "process" | "commerce" | "innovation";
+
+  /** Research decay timers: techId -> rounds since completion without application */
+  researchDecayTimers?: Record<string, number>;
+
+  /** Collaborative research proposals (multiplayer only) */
+  researchProposals?: ResearchProposal[];
+}
+
+/** Collaborative research proposal (multiplayer) */
+export interface ResearchProposal {
+  id: string;
+  /** Team that proposed the collaboration */
+  proposerTeamId: string;
+  /** Target tech ID to research jointly */
+  techId: string;
+  /** Each participating team pays this share of the cost */
+  costPerTeam: number;
+  /** Total cost split between participants */
+  totalCost: number;
+  /** Teams that have accepted */
+  acceptedTeamIds: string[];
+  /** Round the proposal was created */
+  proposedRound: number;
+  /** Deadline round (expires if not accepted) */
+  deadlineRound: number;
+  /** Status of the proposal */
+  status: "pending" | "accepted" | "completed" | "expired";
+  /** Type: joint = shared upgrade, race = first to finish wins patent */
+  type: "joint" | "race";
+}
+
+/** NPC bulk purchase contract */
+export interface ContractOrder {
+  id: string;
+  buyerName: string;
+  segment: Segment;
+  volumeRequired: number;
+  pricePerUnit: number;
+  deadlineRound: number;
+  status: "active" | "fulfilled" | "expired";
 }

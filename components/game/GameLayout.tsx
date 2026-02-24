@@ -27,6 +27,7 @@ import {
   Radio,
   Trophy,
   GraduationCap,
+  TrendingUp,
 } from "lucide-react";
 import { useDecisionStore, GameModule } from "@/lib/stores/decisionStore";
 import { useComplexity } from "@/lib/contexts/ComplexityContext";
@@ -63,6 +64,7 @@ interface GameLayoutProps {
 // Map module IDs to complexity module keys
 const moduleToComplexityKey: Record<string, keyof ReturnType<typeof useComplexity>["settings"]["modules"] | null> = {
   overview: null, // Always visible
+  market: null, // Always visible
   factory: "factory",
   finance: "finance",
   hr: "hr",
@@ -80,6 +82,13 @@ const modules = [
     icon: LayoutDashboard,
     path: "",
     color: "text-slate-400",
+  },
+  {
+    id: "market",
+    name: "Market",
+    icon: TrendingUp,
+    path: "/market",
+    color: "text-cyan-400",
   },
   {
     id: "factory",
@@ -355,6 +364,7 @@ export function GameLayout({
             return (
               <Link
                 key={module.id}
+                id={`nav-${module.id}`}
                 href={`${basePath}${module.path}`}
                 onClick={() => setMobileMenuOpen(false)}
                 className={cn(

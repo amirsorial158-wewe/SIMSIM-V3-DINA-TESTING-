@@ -15,6 +15,10 @@ import { Slider } from "@/components/ui/slider";
 import { trpc } from "@/lib/api/trpc";
 import { useDecisionStore } from "@/lib/stores/decisionStore";
 import { DecisionSubmitBar } from "@/components/game/DecisionSubmitBar";
+import { DecisionImpactPanel } from "@/components/game/DecisionImpactPanel";
+import { WarningBanner } from "@/components/game/WarningBanner";
+import { useFinancePreview } from "@/lib/hooks/useFinancePreview";
+import { useCrossModuleWarnings } from "@/lib/hooks/useCrossModuleWarnings";
 import { useFeatureFlag } from "@/lib/contexts/ComplexityContext";
 import { toast } from "sonner";
 import { TeamState } from "@/engine/types";
@@ -359,6 +363,12 @@ export default function FinancePage({ params }: PageProps) {
     }
   }, [teamState?.marketState]);
 
+  // Cross-module warnings
+  const financeWarnings = useCrossModuleWarnings(state, "finance");
+
+  // Preview hook for live impact
+  const financePreview = useFinancePreview(state, finance, marketState);
+
   // Compute financial data from state
   const financials = useMemo(() => {
     if (!state) return defaultFinancials;
@@ -444,6 +454,9 @@ export default function FinancePage({ params }: PageProps) {
         icon={<DollarSign className="w-7 h-7" />}
         iconColor="text-green-400"
       />
+
+      {/* Cross-module warnings */}
+      <WarningBanner warnings={financeWarnings} />
 
       {/* Main Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -1152,6 +1165,14 @@ export default function FinancePage({ params }: PageProps) {
           )}
         </TabsContent>
       </Tabs>
+
+      {/* Decision Impact Preview */}
+      <DecisionImpactPanel
+        moduleName="Finance"
+        costs={financePreview.costs}
+        messages={financePreview.messages}
+        cashRemaining={state ? state.cash - financePreview.costs : undefined}
+      />
 
       {/* Decision Submit Bar */}
       <DecisionSubmitBar module="FINANCE" getDecisions={getDecisions} />

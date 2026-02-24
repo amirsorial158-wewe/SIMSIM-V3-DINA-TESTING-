@@ -211,6 +211,56 @@ export const GAME_GLOSSARY: Record<string, GlossaryEntry> = {
     definition: "Average happiness across all your employees (0-100%). High morale increases productivity and reduces turnover. Affected by salary, benefits, and working conditions.",
   },
 
+  // === BUSINESS CONCEPTS (Tutorial) ===
+  "cogs": {
+    term: "COGS",
+    definition: "Cost of Goods Sold - the total direct cost to produce your phones (materials, labour, factory overhead). Lower COGS means higher profit per unit.",
+  },
+  "margin": {
+    term: "Margin",
+    definition: "The difference between your selling price and your costs. Higher margin means more profit per phone sold.",
+  },
+  "unit cost": {
+    term: "Unit Cost",
+    definition: "How much it costs to produce a single phone. Includes materials, labour, and factory overhead divided by units produced.",
+  },
+  "demand signal": {
+    term: "Demand Signal",
+    definition: "Market indicators showing how many phones customers want to buy. High demand means phones sell quickly; low demand means inventory sits unsold.",
+  },
+  "price elasticity": {
+    term: "Price Elasticity",
+    definition: "How much demand changes when you change your price. Elastic markets (Budget) are very price-sensitive; inelastic markets (Professional) tolerate higher prices.",
+  },
+  "npv": {
+    term: "NPV",
+    definition: "Net Present Value - the total value of future profits from an investment, discounted to today's dollars. Positive NPV means the investment is worth making.",
+  },
+  "payback period": {
+    term: "Payback Period",
+    definition: "How many rounds it takes for an investment (like a factory upgrade or R&D project) to pay for itself through increased revenue or reduced costs.",
+  },
+  "capacity planning": {
+    term: "Capacity Planning",
+    definition: "Matching your production output to market demand. Too little capacity means lost sales; too much means wasted resources.",
+  },
+  "process optimization": {
+    term: "Process Optimization",
+    definition: "Improving how your factory operates to reduce waste, lower costs, and increase throughput. Achieved through upgrades and skilled workers.",
+  },
+  "competitive advantage": {
+    term: "Competitive Advantage",
+    definition: "What makes your company better than competitors - could be lower costs, better products, stronger brand, or faster innovation.",
+  },
+  "revenue management": {
+    term: "Revenue Management",
+    definition: "Optimizing pricing and sales strategy to maximize total income. Involves balancing price, volume, and market positioning.",
+  },
+  "roi": {
+    term: "ROI",
+    definition: "Return on Investment - how much profit an investment generates relative to its cost. Higher ROI means better use of your capital.",
+  },
+
   // === GAME STRUCTURE ===
   "round checklist": {
     term: "Round Checklist",

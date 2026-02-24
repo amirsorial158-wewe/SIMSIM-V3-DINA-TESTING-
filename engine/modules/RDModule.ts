@@ -219,6 +219,41 @@ export class RDModule {
       messages.push(`New patent acquired! (Total: ${newState.patents})`);
     }
 
+    // Research decay: technologies not applied to products decay over time
+    if (newState.researchDecayTimers) {
+      const unlockedTechs = newState.unlockedTechnologies ?? [];
+      const appliedTechIds = new Set(
+        newState.products.flatMap(p => p.appliedTechs ?? [])
+      );
+
+      for (const techId of unlockedTechs) {
+        if (appliedTechIds.has(techId)) {
+          // Tech is in use — reset decay timer
+          delete newState.researchDecayTimers[techId];
+          continue;
+        }
+
+        // Increment decay timer
+        const current = newState.researchDecayTimers[techId] ?? 0;
+        newState.researchDecayTimers[techId] = current + 1;
+
+        // After 6 rounds unused, tech starts losing effectiveness
+        const DECAY_THRESHOLD = 6;
+        const MAX_DECAY_ROUNDS = 12;
+        if (current + 1 >= DECAY_THRESHOLD) {
+          const decayRounds = (current + 1) - DECAY_THRESHOLD;
+          if (decayRounds === 0) {
+            messages.push(`Warning: Technology "${techId}" is starting to decay from disuse. Apply it to a product!`);
+          } else if (decayRounds >= MAX_DECAY_ROUNDS) {
+            messages.push(`Technology "${techId}" has decayed 50% from disuse.`);
+          }
+        }
+      }
+    } else if ((newState.unlockedTechnologies?.length ?? 0) > 0) {
+      // Initialize decay timers
+      newState.researchDecayTimers = {};
+    }
+
     // Deduct costs from cash
     newState.cash -= totalCosts;
 
