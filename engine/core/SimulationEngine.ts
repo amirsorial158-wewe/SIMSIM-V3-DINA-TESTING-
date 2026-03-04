@@ -221,6 +221,50 @@ export class SimulationEngine {
       });
     }
 
+    // Step 1.5: Calculate production output per segment and store in inventory.finishedGoods
+    // This allows MarketSimulator to cap units sold by actual production capacity
+    for (const team of processedTeams) {
+      const state = team.state;
+      const workers = (state.employees ?? []).filter(e => e.role === "worker");
+      const avgEfficiency = workers.length > 0
+        ? workers.reduce((sum, w) => sum + (w.stats?.efficiency ?? 50), 0) / workers.length
+        : 50;
+      const avgSpeed = workers.length > 0
+        ? workers.reduce((sum, w) => sum + (w.stats?.speed ?? 50), 0) / workers.length
+        : 50;
+
+      let totalProduction = 0;
+      for (const factory of state.factories ?? []) {
+        const { unitsProduced } = FactoryModule.calculateProduction(
+          factory, workers.length, avgEfficiency, avgSpeed
+        );
+        totalProduction += unitsProduced;
+      }
+
+      // Distribute production across launched product segments
+      const launchedSegments = [...new Set(
+        (state.products ?? [])
+          .filter(p => p.developmentStatus === "launched")
+          .map(p => p.segment)
+      )];
+
+      if (!state.inventory) {
+        state.inventory = {
+          finishedGoods: { Budget: 0, General: 0, Enthusiast: 0, Professional: 0, "Active Lifestyle": 0 } as Record<string, number>,
+          rawMaterials: 0,
+          workInProgress: 0,
+        };
+      }
+
+      if (launchedSegments.length > 0 && totalProduction > 0) {
+        const perSegment = Math.floor(totalProduction / launchedSegments.length);
+        for (const seg of launchedSegments) {
+          const prev = (state.inventory.finishedGoods as Record<string, number>)[seg] ?? 0;
+          (state.inventory.finishedGoods as Record<string, number>)[seg] = prev + perSegment;
+        }
+      }
+    }
+
     // Step 2: Run market simulation (competition between all teams)
     // Use the first team's context for market simulation (all contexts share same market seed)
     summaryMessages.push("Running market simulation...");

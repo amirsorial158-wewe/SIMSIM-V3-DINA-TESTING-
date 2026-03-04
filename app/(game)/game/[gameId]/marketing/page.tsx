@@ -474,6 +474,79 @@ export default function MarketingPage({ params }: PageProps) {
             </Card>
           </div>
 
+          {/* Marketing ROI Dashboard */}
+          <Card className="bg-slate-800 border-pink-700/30">
+            <CardHeader>
+              <CardTitle className="text-white flex items-center gap-2">
+                <TrendingUp className="w-5 h-5 text-pink-400" />
+                Marketing Impact
+              </CardTitle>
+              <CardDescription className="text-slate-400">
+                How your marketing spend translates to market share and revenue
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Brand change preview */}
+              {(() => {
+                const previewBrand = marketingPreview.previewState?.brandValue;
+                const currentBrand = marketingData.brandValue;
+                const brandChange = previewBrand != null ? previewBrand - currentBrand : 0;
+                const totalSpend = getTotalAdBudget() + brandInvestment;
+                return (
+                  <div className="space-y-3">
+                    <div className="p-3 bg-slate-700/30 rounded-lg">
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="text-sm text-slate-300">Total Marketing Spend</span>
+                        <span className="text-pink-400 font-medium">{formatCurrency(totalSpend)}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-slate-300">Brand Value</span>
+                        <span className="text-white">
+                          {(currentBrand * 100).toFixed(0)}%
+                          {brandChange !== 0 && (
+                            <span className={brandChange > 0 ? "text-green-400" : "text-red-400"}>
+                              {" "}({brandChange > 0 ? "+" : ""}{(brandChange * 100).toFixed(1)}%)
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                      {totalSpend === 0 && (
+                        <p className="text-xs text-amber-400 mt-2">
+                          Brand decays ~2% per round without marketing investment.
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Segment-specific brand impact guidance */}
+                    <div className="space-y-1.5">
+                      <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">Brand Impact by Segment</p>
+                      {([
+                        { segment: "Budget", weight: 8, impact: "Low", color: "text-slate-400" },
+                        { segment: "General", weight: 25, impact: "High", color: "text-green-400" },
+                        { segment: "Enthusiast", weight: 12, impact: "Moderate", color: "text-yellow-400" },
+                        { segment: "Professional", weight: 10, impact: "Moderate", color: "text-yellow-400" },
+                        { segment: "Active Lifestyle", weight: 15, impact: "Moderate", color: "text-yellow-400" },
+                      ] as const).map((seg) => (
+                        <div key={seg.segment} className="flex items-center justify-between text-xs p-2 bg-slate-700/20 rounded">
+                          <span className="text-slate-300">{seg.segment}</span>
+                          <div className="flex items-center gap-3">
+                            <span className="text-slate-500">Brand weight: {seg.weight}%</span>
+                            <span className={`font-medium ${seg.color}`}>{seg.impact} impact</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <p className="text-xs text-slate-500">
+                      Focus marketing spend on General (25% brand weight) for highest ROI.
+                      Budget segment is price-driven — marketing has minimal effect there.
+                    </p>
+                  </div>
+                );
+              })()}
+            </CardContent>
+          </Card>
+
           {/* Current Round Marketing Decisions */}
           <Card className="bg-slate-800 border-slate-700">
             <CardHeader>

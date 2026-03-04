@@ -25,6 +25,8 @@ import { useFeatureFlag } from "@/lib/contexts/ComplexityContext";
 import { toast } from "sonner";
 import { TeamState } from "@/engine/types";
 import { FinancialStatementsComponent } from "@/components/game/FinancialStatements";
+import { FinanceRequirementsPanel } from "@/components/game/RequirementsPanel";
+import { useFinanceRequirements } from "@/lib/hooks/useRequirementsChain";
 import {
   DollarSign,
   TrendingUp,
@@ -353,6 +355,9 @@ export default function FinancePage({ params }: PageProps) {
     }
   }, [teamState?.state]);
 
+  // Finance requirements panel data
+  const financeRequirements = useFinanceRequirements(state);
+
   // Parse market state for FX rates
   const marketState = useMemo(() => {
     if (!teamState?.marketState) return null;
@@ -466,6 +471,9 @@ export default function FinancePage({ params }: PageProps) {
 
       {/* Last round recap */}
       <ModuleRecap module="finance" currentRound={currentRound} state={state} history={[]} />
+
+      {/* Complete cost picture */}
+      <FinanceRequirementsPanel data={financeRequirements} />
 
       {/* Main Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>

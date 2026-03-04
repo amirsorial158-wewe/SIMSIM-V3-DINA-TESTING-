@@ -18,6 +18,7 @@ export interface MachineStatus {
   machineType: string;
   availability: MachineAvailability;
   reason?: string;
+  ownedCount?: number;
 }
 
 export function useMachineryAvailability(state: TeamState | null): MachineStatus[] {
@@ -27,6 +28,15 @@ export function useMachineryAvailability(state: TeamState | null): MachineStatus
     const rdLevel = getRdLevel(state);
     const activeSegments = getActiveSegments(state);
     const ownedMachines = new Set(getOwnedMachineTypes(state));
+    // Count-based ownership
+    const ownedCounts: Record<string, number> = {};
+    if (state.machineryStates) {
+      for (const fm of Object.values(state.machineryStates)) {
+        for (const m of fm.machines) {
+          ownedCounts[m.type] = (ownedCounts[m.type] ?? 0) + 1;
+        }
+      }
+    }
     const upgrades = new Set(getFactoryUpgrades(state));
     const materialTier = getMaterialQualityTier(state);
 
@@ -47,7 +57,7 @@ export function useMachineryAvailability(state: TeamState | null): MachineStatus
     return allMachines.map((machineType) => {
       // Already owned
       if (ownedMachines.has(machineType)) {
-        return { machineType, availability: "owned" as const };
+        return { machineType, availability: "owned" as const, ownedCount: ownedCounts[machineType] ?? 1 };
       }
 
       // Not relevant to current segments

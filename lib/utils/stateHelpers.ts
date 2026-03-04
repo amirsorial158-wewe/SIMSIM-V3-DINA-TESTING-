@@ -120,6 +120,18 @@ export function getOwnedMachineTypes(state: TeamState): string[] {
   return [...types];
 }
 
+/** Returns count of each machine type owned across all factories */
+export function getOwnedMachineCounts(state: TeamState): Record<string, number> {
+  const counts: Record<string, number> = {};
+  if (!state.machineryStates) return counts;
+  for (const fm of Object.values(state.machineryStates)) {
+    for (const m of fm.machines) {
+      counts[m.type] = (counts[m.type] ?? 0) + 1;
+    }
+  }
+  return counts;
+}
+
 export function getFactoryUpgrades(state: TeamState): string[] {
   const upgrades: string[] = [];
   for (const f of state.factories) {

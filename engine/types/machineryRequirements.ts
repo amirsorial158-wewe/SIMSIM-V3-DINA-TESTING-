@@ -106,3 +106,25 @@ export function getMissingMachinery(
   const ownedSet = new Set(ownedMachineTypes);
   return requirements.filter((r) => !ownedSet.has(r.machineType));
 }
+
+/**
+ * Compute total machinery needed across all products (count-based).
+ * Each product requires its own set of machines — if 2 products both need
+ * an assembly_line, the team needs 2 assembly_lines.
+ */
+export function getTotalMachineryNeeded(
+  products: Array<{ name: string; tier: number }>
+): Record<string, { count: number; products: string[]; reason: string }> {
+  const totals: Record<string, { count: number; products: string[]; reason: string }> = {};
+  for (const product of products) {
+    const reqs = getMachineryRequirements(product.tier);
+    for (const req of reqs) {
+      if (!totals[req.machineType]) {
+        totals[req.machineType] = { count: 0, products: [], reason: req.reason };
+      }
+      totals[req.machineType].count += 1;
+      totals[req.machineType].products.push(product.name);
+    }
+  }
+  return totals;
+}

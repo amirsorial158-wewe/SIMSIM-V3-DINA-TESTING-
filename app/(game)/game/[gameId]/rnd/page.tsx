@@ -22,7 +22,7 @@ import { useRDPreview } from "@/lib/hooks/useRDPreview";
 import { useCrossModuleWarnings } from "@/lib/hooks/useCrossModuleWarnings";
 import { GlobalTechTree } from "@/components/rd/GlobalTechTree";
 import { useFeatureFlag } from "@/lib/contexts/ComplexityContext";
-import { TeamState, Product as EngineProduct } from "@/engine/types";
+import { TeamState, Product as EngineProduct, CONSTANTS } from "@/engine/types";
 import type { Patent } from "@/engine/types/patents";
 import { SEGMENT_FEATURE_PREFERENCES } from "@/engine/types/features";
 import type { ProductFeatureSet } from "@/engine/types/features";
@@ -370,6 +370,14 @@ export default function RDPage({ params }: PageProps) {
     }
   }, [rdData.unlockedTechs, rdData.patents, techNodes]);
 
+  // Compute R&D points per round for progress estimation
+  const rdPointsPerRound = useMemo(() => {
+    const engineerCount = (state?.employees ?? []).filter(e => e.role === "engineer").length;
+    const engineerPts = engineerCount * CONSTANTS.BASE_RD_POINTS_PER_ENGINEER;
+    const budgetPts = Math.floor(rdInvestment / CONSTANTS.RD_BUDGET_TO_POINTS_RATIO);
+    return engineerPts + budgetPts;
+  }, [state?.employees, rdInvestment]);
+
   // Build notifications from state
   const notifications = useMemo(() => {
     const notifs: Array<{
@@ -511,7 +519,8 @@ export default function RDPage({ params }: PageProps) {
           {/* Global Tech Tree */}
           <GlobalTechTree
             unlockedTechs={state?.unlockedTechnologies ?? []}
-            currentRdPoints={state?.rdPoints ?? 0}
+            currentRdPoints={state?.rdProgress ?? 0}
+            rdPointsPerRound={rdPointsPerRound}
           />
 
           {/* R&D Investment */}
@@ -557,6 +566,29 @@ export default function RDPage({ params }: PageProps) {
                 <div className="p-3 bg-slate-700/50 rounded-lg">
                   <div className="text-slate-400 text-sm">Dev Speed Bonus</div>
                   <div className="text-green-400 font-medium">+{Math.floor(rdInvestment / 15_000_000) * 10}%</div>
+                </div>
+              </div>
+
+              {/* R&D Points Generation Breakdown */}
+              <div className="p-3 bg-purple-500/5 border border-purple-500/20 rounded-lg">
+                <div className="text-sm font-medium text-purple-300 mb-2">R&D Points Generation</div>
+                <div className="grid grid-cols-3 gap-3 text-xs">
+                  <div>
+                    <span className="text-slate-400">Engineers: </span>
+                    <span className="text-white">
+                      {(state?.employees ?? []).filter(e => e.role === "engineer").length} × {CONSTANTS.BASE_RD_POINTS_PER_ENGINEER} = {(state?.employees ?? []).filter(e => e.role === "engineer").length * CONSTANTS.BASE_RD_POINTS_PER_ENGINEER} pts
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400">Budget: </span>
+                    <span className="text-white">
+                      {formatCurrency(rdInvestment)} ÷ {formatCurrency(CONSTANTS.RD_BUDGET_TO_POINTS_RATIO)} = {Math.floor(rdInvestment / CONSTANTS.RD_BUDGET_TO_POINTS_RATIO)} pts
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400">Total: </span>
+                    <span className="text-cyan-400 font-medium">~{rdPointsPerRound} pts/round</span>
+                  </div>
                 </div>
               </div>
             </CardContent>

@@ -292,13 +292,13 @@ export const DEFAULT_MARKET_CONFIG: MarketConfig = {
   segments: ["Budget", "General", "Enthusiast", "Professional", "Active Lifestyle"],
   regions: ["North America", "Europe", "Asia", "MENA"],
 
-  // Segment weights (v2.4.0 balanced)
+  // Segment weights (v5.0 — brand boosted ~50% to make marketing more impactful)
   segmentWeights: {
-    Budget:           { price: 65, quality: 15, brand: 5,  esg: 5,  features: 10 },
-    General:          { price: 28, quality: 23, brand: 17, esg: 10, features: 22 },
-    Enthusiast:       { price: 12, quality: 30, brand: 8,  esg: 5,  features: 45 },
-    Professional:     { price: 8,  quality: 48, brand: 7,  esg: 20, features: 17 },
-    "Active Lifestyle": { price: 20, quality: 34, brand: 10, esg: 10, features: 26 },
+    Budget:           { price: 62, quality: 14, brand: 8,  esg: 5,  features: 11 },
+    General:          { price: 22, quality: 20, brand: 25, esg: 10, features: 23 },
+    Enthusiast:       { price: 10, quality: 28, brand: 12, esg: 5,  features: 45 },
+    Professional:     { price: 7,  quality: 45, brand: 10, esg: 20, features: 18 },
+    "Active Lifestyle": { price: 17, quality: 31, brand: 15, esg: 10, features: 27 },
   },
 
   // Softmax

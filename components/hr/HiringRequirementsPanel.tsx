@@ -1,12 +1,15 @@
 "use client";
 
+import { useState } from "react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Users, AlertTriangle, CheckCircle2 } from "lucide-react";
-import type { HiringRequirement } from "@/lib/hooks/calculateHiringRequirements";
+import { Button } from "@/components/ui/button";
+import { Users, AlertTriangle, CheckCircle2, ChevronDown, ChevronUp } from "lucide-react";
+import type { HiringRequirement, ProductStaffingNeed } from "@/lib/hooks/calculateHiringRequirements";
 
 interface HiringRequirementsPanelProps {
   requirements: HiringRequirement[];
+  productStaffingNeeds?: ProductStaffingNeed[];
 }
 
 const URGENCY_STYLES = {
@@ -21,7 +24,8 @@ const URGENCY_LABELS = {
   optional: "Sufficient",
 };
 
-export function HiringRequirementsPanel({ requirements }: HiringRequirementsPanelProps) {
+export function HiringRequirementsPanel({ requirements, productStaffingNeeds }: HiringRequirementsPanelProps) {
+  const [showBreakdown, setShowBreakdown] = useState(false);
   const hasShortfall = requirements.some(r => r.shortfall > 0);
   if (!hasShortfall) return null;
 
@@ -32,7 +36,7 @@ export function HiringRequirementsPanel({ requirements }: HiringRequirementsPane
           <Users className="w-5 h-5 text-amber-400" />
           <div>
             <h3 className="text-white font-semibold text-sm">Staffing Requirements</h3>
-            <p className="text-slate-400 text-xs">Based on your current operations</p>
+            <p className="text-slate-400 text-xs">Based on your products and operations</p>
           </div>
         </div>
       </CardHeader>
@@ -65,6 +69,40 @@ export function HiringRequirementsPanel({ requirements }: HiringRequirementsPane
             </div>
           ))}
         </div>
+
+        {/* Product staffing breakdown */}
+        {productStaffingNeeds && productStaffingNeeds.length > 0 && (
+          <div className="mt-3">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-slate-400 hover:text-white text-xs h-7 px-2"
+              onClick={() => setShowBreakdown(!showBreakdown)}
+            >
+              {showBreakdown ? <ChevronUp className="w-3 h-3 mr-1" /> : <ChevronDown className="w-3 h-3 mr-1" />}
+              Why these numbers?
+            </Button>
+            {showBreakdown && (
+              <div className="mt-2 p-3 bg-slate-700/30 rounded-lg space-y-1.5">
+                <p className="text-slate-400 text-xs font-medium mb-2">Staffing breakdown by product:</p>
+                {productStaffingNeeds.map((pn, idx) => (
+                  <div key={idx} className="flex justify-between text-xs">
+                    <span className="text-slate-300">{pn.productName} ({pn.segment})</span>
+                    <span className="text-slate-400">
+                      {pn.machinesNeeded} machines &rarr; {pn.workersNeeded} workers
+                    </span>
+                  </div>
+                ))}
+                <div className="pt-1.5 border-t border-slate-600 flex justify-between text-xs font-medium">
+                  <span className="text-slate-300">Total from products</span>
+                  <span className="text-amber-400">
+                    {productStaffingNeeds.reduce((s, p) => s + p.workersNeeded, 0)} workers needed
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </CardContent>
     </Card>
   );

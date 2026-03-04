@@ -220,11 +220,59 @@ export class RDModule {
       }
     }
 
-    // Patent generation from R&D progress (v3.1.0: threshold 500→200, Fix 3.1)
-    while (newState.rdProgress >= 200) {
-      newState.patents += 1;
-      newState.rdProgress -= 200;
-      messages.push(`New patent acquired! (Total: ${newState.patents})`);
+    // Patent generation from R&D progress (milestone-based, non-consuming)
+    // rdProgress accumulates freely; patents awarded at 200/400/600/... milestones
+    const patentThreshold = 200;
+    const currentPatents = typeof newState.patents === 'number' ? newState.patents : 0;
+    const totalPatentsEarned = Math.floor(newState.rdProgress / patentThreshold);
+    const newPatentsCount = totalPatentsEarned - currentPatents;
+    if (newPatentsCount > 0) {
+      newState.patents = totalPatentsEarned;
+      messages.push(`${newPatentsCount} new patent(s) earned! (Total: ${totalPatentsEarned})`);
+    }
+
+    // Auto-unlock tech nodes based on rdProgress thresholds
+    const TIER_THRESHOLDS = [
+      { tier: 1, rdRequired: 50, legacyTech: "process_optimization" },
+      { tier: 2, rdRequired: 200, legacyTech: "advanced_manufacturing" },
+      { tier: 3, rdRequired: 500, legacyTech: "industry_4_0" },
+      { tier: 4, rdRequired: 800, legacyTech: "breakthrough_tech" },
+      { tier: 5, rdRequired: 1200, legacyTech: null },
+    ];
+
+    const unlockedTechs = new Set(newState.unlockedTechnologies ?? []);
+    const prevUnlockedCount = unlockedTechs.size;
+
+    // Determine max tier we can unlock
+    let maxUnlockableTier = 0;
+    for (const t of TIER_THRESHOLDS) {
+      if (newState.rdProgress >= t.rdRequired) {
+        maxUnlockableTier = t.tier;
+        // Add legacy tech for stateHelpers.getRdLevel()
+        if (t.legacyTech) unlockedTechs.add(t.legacyTech);
+      }
+    }
+
+    // Iteratively unlock 54-node tech tree nodes up to maxUnlockableTier
+    // Each iteration may unlock nodes whose prerequisites were just met
+    if (maxUnlockableTier > 0) {
+      let changed = true;
+      while (changed) {
+        changed = false;
+        const available = RDExpansions.getAvailableResearch([...unlockedTechs]);
+        for (const node of available) {
+          if (node.tier <= maxUnlockableTier) {
+            unlockedTechs.add(node.id);
+            changed = true;
+          }
+        }
+      }
+    }
+
+    newState.unlockedTechnologies = [...unlockedTechs];
+    const newlyUnlocked = unlockedTechs.size - prevUnlockedCount;
+    if (newlyUnlocked > 0) {
+      messages.push(`${newlyUnlocked} new technology node(s) unlocked! (R&D Level: ${maxUnlockableTier})`);
     }
 
     // Research decay: technologies not applied to products decay over time

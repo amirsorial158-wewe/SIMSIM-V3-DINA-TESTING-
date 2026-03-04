@@ -90,8 +90,10 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import { getArchetype } from "@/engine/types/archetypes";
-import { getMachineryRequirements, type MachineryRequirement } from "@/engine/types/machineryRequirements";
+import { getMachineryRequirements, getTotalMachineryNeeded, type MachineryRequirement } from "@/engine/types/machineryRequirements";
 import { MACHINE_CONFIGS, type Machine } from "@/engine/machinery";
+import { ProductionReadinessPanel } from "@/components/game/RequirementsPanel";
+import { useFactoryRequirements } from "@/lib/hooks/useRequirementsChain";
 
 interface PageProps {
   params: Promise<{ gameId: string }>;
@@ -541,6 +543,9 @@ export default function FactoryPage({ params }: PageProps) {
     return new Set<string>(getActiveSegments(state));
   }, [state]);
 
+  // Production readiness from requirements chain
+  const factoryRequirements = useFactoryRequirements(state);
+
   // Auto-distribute allocation evenly among active (launched) segments
   const activeSegmentCountRef = useRef(0);
   useEffect(() => {
@@ -583,34 +588,67 @@ export default function FactoryPage({ params }: PageProps) {
 
   // Compute required machinery based on R&D pending products
   const requiredMachinery = useMemo(() => {
-    const products = rd.newProducts || [];
-    if (products.length === 0) return [];
+    // Collect ALL products: launched + in-development + new R&D decisions
+    const allProducts: Array<{ name: string; tier: number }> = [];
 
-    let maxTier = 0;
-    const productNames: string[] = [];
-    for (const product of products) {
-      if (product.archetypeId) {
-        const archetype = getArchetype(product.archetypeId);
-        if (archetype) {
-          maxTier = Math.max(maxTier, archetype.tier);
-          productNames.push(archetype.name);
-        }
-      } else {
-        productNames.push(product.name);
+    // Existing launched and in-development products
+    for (const p of state?.products ?? []) {
+      if (p.developmentStatus === "launched" || p.developmentStatus === "in_development") {
+        const tier = p.archetypeId ? (getArchetype(p.archetypeId)?.tier ?? 0) : 0;
+        allProducts.push({ name: p.name, tier });
       }
     }
 
-    const requirements = getMachineryRequirements(maxTier);
-    const ownedUpgrades = selectedFactory.upgrades || [];
-    return requirements.map((req) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const installed = ownedUpgrades.includes(req.machineType as any);
-      const pending = upgradePurchases.some(
-        (u) => u.factoryId === selectedFactory.id && u.upgradeName === req.machineType
-      );
-      return { ...req, installed: !!installed, pending, productNames };
+    // New R&D queue products
+    for (const product of rd.newProducts ?? []) {
+      if (product.archetypeId) {
+        const archetype = getArchetype(product.archetypeId);
+        if (archetype) {
+          allProducts.push({ name: archetype.name, tier: archetype.tier });
+        }
+      } else {
+        allProducts.push({ name: product.name, tier: 0 });
+      }
+    }
+
+    if (allProducts.length === 0) return [];
+
+    // Count-based: each product needs its own set of machines
+    const totalNeeded = getTotalMachineryNeeded(allProducts);
+
+    // Count owned machines
+    const ownedCounts: Record<string, number> = {};
+    if (state?.machineryStates) {
+      for (const ms of Object.values(state.machineryStates)) {
+        for (const m of ms.machines ?? []) {
+          ownedCounts[m.type] = (ownedCounts[m.type] ?? 0) + 1;
+        }
+      }
+    }
+
+    // Count pending purchases
+    const pendingCounts: Record<string, number> = {};
+    for (const u of upgradePurchases) {
+      pendingCounts[u.upgradeName] = (pendingCounts[u.upgradeName] ?? 0) + 1;
+    }
+
+    return Object.entries(totalNeeded).map(([machineType, info]) => {
+      const owned = ownedCounts[machineType] ?? 0;
+      const pending = pendingCounts[machineType] ?? 0;
+      const totalHave = owned + pending;
+      return {
+        machineType,
+        reason: info.reason,
+        productNames: info.products,
+        countNeeded: info.count,
+        countOwned: owned,
+        countPending: pending,
+        installed: totalHave >= info.count,
+        pending: pending > 0 && totalHave < info.count,
+        shortfall: Math.max(0, info.count - totalHave),
+      };
     });
-  }, [rd.newProducts, upgradePurchases, selectedFactory.upgrades, selectedFactory.id]);
+  }, [rd.newProducts, upgradePurchases, state?.products, state?.machineryStates]);
 
   // Machinery availability from R&D level / material tier
   const machineStatuses = useMachineryAvailability(state);
@@ -770,25 +808,65 @@ export default function FactoryPage({ params }: PageProps) {
 
   // Check if an upgrade/machine is already purchased or pending
   const isUpgradePurchased = (upgradeId: string) => {
-    // Check factory upgrades
+    // Count-based: how many of this type are owned across all factories
+    let ownedCount = 0;
+    if (state?.machineryStates) {
+      for (const ms of Object.values(state.machineryStates)) {
+        for (const m of ms.machines ?? []) {
+          if (m.type === upgradeId) ownedCount++;
+        }
+      }
+    }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const installedUpgrade = selectedFactory.upgrades?.includes(upgradeId as any);
-    // Check owned machines in machinery state
-    const ownedMachines = state?.machineryStates?.[selectedFactory.id]?.machines ?? [];
-    const installedMachine = ownedMachines.some(m => m.type === upgradeId);
-    const installed = installedUpgrade || installedMachine;
-    const pending = upgradePurchases.some(u => u.factoryId === selectedFactory.id && u.upgradeName === upgradeId);
-    return { installed, pending };
+    if (selectedFactory.upgrades?.includes(upgradeId as any)) ownedCount = Math.max(ownedCount, 1);
+
+    const pendingCount = upgradePurchases.filter(
+      u => u.upgradeName === upgradeId
+    ).length;
+
+    // Check total needed from requiredMachinery
+    const req = requiredMachinery.find(r => r.machineType === upgradeId);
+    const totalNeeded = req?.countNeeded ?? 0;
+    const totalHave = ownedCount + pendingCount;
+
+    return {
+      installed: totalNeeded > 0 ? totalHave >= totalNeeded : ownedCount > 0,
+      pending: pendingCount > 0,
+      ownedCount,
+      pendingCount,
+      totalNeeded,
+      shortfall: Math.max(0, totalNeeded - totalHave),
+    };
   };
 
-  // Toggle upgrade purchase (prevents buying already-owned machines)
+  // Toggle upgrade purchase — allows buying duplicates up to the count needed
   const toggleUpgradePurchase = (upgradeId: string) => {
-    const { installed } = isUpgradePurchased(upgradeId);
-    if (installed) return; // Already owned — don't allow re-purchase
+    const status = isUpgradePurchased(upgradeId);
 
-    const pending = upgradePurchases.some(u => u.factoryId === selectedFactory.id && u.upgradeName === upgradeId);
-    if (pending) {
-      setUpgradePurchases(prev => prev.filter(u => !(u.factoryId === selectedFactory.id && u.upgradeName === upgradeId)));
+    // If fully satisfied, remove one pending instead (toggle off)
+    if (status.installed && status.pendingCount > 0) {
+      // Remove one pending purchase of this type
+      const idx = upgradePurchases.findIndex(
+        u => u.factoryId === selectedFactory.id && u.upgradeName === upgradeId
+      );
+      if (idx >= 0) {
+        setUpgradePurchases(prev => prev.filter((_, i) => i !== idx));
+      }
+      return;
+    }
+
+    // If there's a shortfall, add another purchase
+    if (status.shortfall > 0) {
+      setUpgradePurchases(prev => [...prev, { factoryId: selectedFactory.id, upgradeName: upgradeId }]);
+      return;
+    }
+
+    // For non-product-required machines (machinery tab browsing): toggle on/off
+    const existingIdx = upgradePurchases.findIndex(
+      u => u.factoryId === selectedFactory.id && u.upgradeName === upgradeId
+    );
+    if (existingIdx >= 0) {
+      setUpgradePurchases(prev => prev.filter((_, i) => i !== existingIdx));
     } else {
       setUpgradePurchases(prev => [...prev, { factoryId: selectedFactory.id, upgradeName: upgradeId }]);
     }
@@ -1383,6 +1461,9 @@ export default function FactoryPage({ params }: PageProps) {
             transition={{ duration: 0.3 }}
             className="space-y-6"
           >
+          {/* Production Readiness Panel */}
+          <ProductionReadinessPanel data={factoryRequirements} />
+
           {/* Production Allocation */}
           <Card className="bg-slate-800/80 border-slate-700/50 backdrop-blur-sm">
             <CardHeader>
@@ -2048,7 +2129,7 @@ export default function FactoryPage({ params }: PageProps) {
                     Required Machinery for Your Products
                   </CardTitle>
                   <CardDescription className="text-purple-300/70">
-                    Your R&D queue includes: {requiredMachinery[0]?.productNames?.join(", ")}. These machines are needed to produce them.
+                    Each product requires its own set of machines. {requiredMachinery.reduce((sum, r) => sum + r.countNeeded, 0)} total machines needed for {[...new Set(requiredMachinery.flatMap(r => r.productNames))].length} product(s).
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -2059,7 +2140,7 @@ export default function FactoryPage({ params }: PageProps) {
                         className={`flex items-center justify-between p-3 rounded-lg border ${
                           req.installed
                             ? "bg-green-900/20 border-green-600/30"
-                            : req.pending
+                            : req.shortfall > 0 && req.countPending > 0
                             ? "bg-orange-900/20 border-orange-600/30"
                             : "bg-red-900/20 border-red-600/30"
                         }`}
@@ -2067,42 +2148,46 @@ export default function FactoryPage({ params }: PageProps) {
                         <div className="flex items-center gap-3">
                           {req.installed ? (
                             <CheckCircle2 className="w-4 h-4 text-green-400 flex-shrink-0" />
-                          ) : req.pending ? (
+                          ) : req.countPending > 0 ? (
                             <Clock className="w-4 h-4 text-orange-400 flex-shrink-0" />
                           ) : (
                             <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
                           )}
                           <div>
                             <span className="text-white text-sm font-medium">
-                              {req.machineType.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())}
+                              {req.machineType.replace(/_/g, " ").replace(/\b\w/g, (l: string) => l.toUpperCase())}
                             </span>
-                            <p className="text-slate-400 text-xs">{req.reason}</p>
+                            <p className="text-slate-400 text-xs">
+                              {req.countNeeded} needed ({req.countOwned} owned{req.countPending > 0 ? `, ${req.countPending} queued` : ""})
+                              {req.shortfall > 0 && <span className="text-red-400"> — {req.shortfall} missing</span>}
+                            </p>
+                            <p className="text-slate-500 text-[10px]">
+                              For: {req.productNames.join(", ")}
+                            </p>
                           </div>
                         </div>
                         <div>
                           {req.installed ? (
-                            <Badge className="bg-green-500/20 text-green-400 text-xs">Owned</Badge>
-                          ) : req.pending ? (
-                            <Badge className="bg-orange-500/20 text-orange-400 text-xs">Queued</Badge>
+                            <Badge className="bg-green-500/20 text-green-400 text-xs">{req.countOwned + req.countPending}/{req.countNeeded}</Badge>
                           ) : (
                             <Button
                               size="sm"
                               className="bg-purple-600 hover:bg-purple-700 h-7 text-xs"
                               onClick={() => toggleUpgradePurchase(req.machineType)}
                             >
-                              Purchase
+                              Purchase {req.shortfall > 1 ? `(${req.shortfall} needed)` : ""}
                             </Button>
                           )}
                         </div>
                       </div>
                     ))}
                   </div>
-                  {requiredMachinery.some((r) => !r.installed && !r.pending) && (
+                  {requiredMachinery.some((r) => r.shortfall > 0) && (
                     <p className="text-red-400/80 text-xs mt-3">
                       Missing machinery will reduce production quality and capacity for your products.
                     </p>
                   )}
-                  {requiredMachinery.every((r) => r.installed || r.pending) && (
+                  {requiredMachinery.every((r) => r.shortfall === 0) && (
                     <div className="mt-3 flex items-center justify-between">
                       <p className="text-green-400/80 text-xs">
                         All required machinery is ready.

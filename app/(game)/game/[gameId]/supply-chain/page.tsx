@@ -30,7 +30,7 @@ import {
   Percent,
   Ship,
 } from "lucide-react";
-import type { Segment } from "@/engine/types";
+import type { Segment, TeamState } from "@/engine/types";
 import {
   MaterialEngine,
   DEFAULT_SUPPLIERS,
@@ -89,7 +89,7 @@ export default function SupplyChainPage({ params }: PageProps) {
   const activeOrders = materialsState?.activeOrders ?? [];
   const currentRound = teamState?.game.currentRound ?? 1;
   const teamRegion: Region = materialsState?.region ?? "North America";
-  const cash = teamState?.cash ?? 0;
+  // Cash is accessed from parsed state below
 
   // Get material requirements for selected segment
   const requirements = useMemo(
@@ -154,6 +154,62 @@ export default function SupplyChainPage({ params }: PageProps) {
     return inventory.reduce((sum, inv) => sum + inv.quantity * inv.averageCost, 0);
   }, [inventory]);
 
+  // Parse team state to get product info
+  const state: TeamState | null = useMemo(() => {
+    if (!teamState?.state) return null;
+    try {
+      return typeof teamState.state === 'string'
+        ? JSON.parse(teamState.state) as TeamState
+        : teamState.state as TeamState;
+    } catch {
+      return null;
+    }
+  }, [teamState?.state]);
+
+  const cash = state?.cash ?? 0;
+
+  // Product-driven material needs
+  const productMaterialNeeds = useMemo(() => {
+    if (!state?.products) return [];
+    const launchedProducts = state.products.filter(p => p.developmentStatus === "launched");
+    return launchedProducts.map(p => {
+      const reqs = MaterialEngine.getMaterialRequirements(p.segment);
+      const totalCostPerUnit = reqs.materials.reduce((sum, m) => sum + m.costPerUnit, 0);
+      return {
+        productName: p.name,
+        segment: p.segment,
+        materials: reqs.materials,
+        totalCostPerUnit,
+        estimatedQuantity: 10000, // Default production batch
+      };
+    });
+  }, [state?.products]);
+
+  // Sourcing strategy state
+  const [sourcingStrategy, setSourcingStrategy] = useState<"economy" | "standard" | "premium">("standard");
+
+  const SOURCING_STRATEGIES = {
+    economy: { label: "Economy", qualityMult: 0.9, costMult: 0.7, leadTime: 3, color: "text-green-400", borderColor: "border-green-500/30", bgColor: "bg-green-500/10" },
+    standard: { label: "Standard", qualityMult: 1.0, costMult: 1.0, leadTime: 2, color: "text-cyan-400", borderColor: "border-cyan-500/30", bgColor: "bg-cyan-500/10" },
+    premium: { label: "Premium", qualityMult: 1.15, costMult: 1.4, leadTime: 1, color: "text-purple-400", borderColor: "border-purple-500/30", bgColor: "bg-purple-500/10" },
+  } as const;
+
+  // Calculate bulk order cost
+  const bulkOrderPreview = useMemo(() => {
+    if (productMaterialNeeds.length === 0) return null;
+    const strategy = SOURCING_STRATEGIES[sourcingStrategy];
+    let totalCost = 0;
+    let totalItems = 0;
+    for (const product of productMaterialNeeds) {
+      for (const material of product.materials) {
+        const cost = material.costPerUnit * strategy.costMult * product.estimatedQuantity;
+        totalCost += cost;
+        totalItems++;
+      }
+    }
+    return { totalCost, totalItems, leadTime: strategy.leadTime, qualityMultiplier: strategy.qualityMult };
+  }, [productMaterialNeeds, sourcingStrategy]);
+
   // Place order mutation
   const placeOrderMutation = trpc.material.placeOrder.useMutation({
     onSuccess: (result) => {
@@ -166,6 +222,51 @@ export default function SupplyChainPage({ params }: PageProps) {
       toast.error(error.message);
     },
   });
+
+  // Handle bulk order (one-click) - places individual orders for all materials
+  const handleBulkOrder = async () => {
+    if (!bulkOrderPreview || productMaterialNeeds.length === 0) return;
+    const strategy = SOURCING_STRATEGIES[sourcingStrategy];
+    let ordersPlaced = 0;
+    let ordersFailed = 0;
+
+    for (const product of productMaterialNeeds) {
+      for (const material of product.materials) {
+        // Pick best supplier for this material type based on strategy
+        const suppliers = DEFAULT_SUPPLIERS.filter(s => s.materials.includes(material.type));
+        if (suppliers.length === 0) continue;
+
+        // Sort by quality for premium, by defect rate for economy, balanced for standard
+        const sorted = [...suppliers].sort((a, b) => {
+          if (sourcingStrategy === "premium") return b.qualityRating - a.qualityRating;
+          if (sourcingStrategy === "economy") return a.qualityRating - b.qualityRating; // cheaper = lower quality
+          return b.qualityRating - a.qualityRating;
+        });
+        const supplier = sorted[0];
+
+        try {
+          await placeOrderMutation.mutateAsync({
+            materialType: material.type,
+            spec: material.spec,
+            supplierId: supplier.id,
+            region: supplier.region,
+            quantity: product.estimatedQuantity,
+            shippingMethod: sourcingStrategy === "premium" ? "air" : sourcingStrategy === "economy" ? "sea" : "sea",
+          });
+          ordersPlaced++;
+        } catch {
+          ordersFailed++;
+        }
+      }
+    }
+
+    if (ordersPlaced > 0) {
+      toast.success(`${ordersPlaced} material order(s) placed successfully!`);
+    }
+    if (ordersFailed > 0) {
+      toast.error(`${ordersFailed} order(s) failed. Check available cash.`);
+    }
+  };
 
   // Handle order placement
   const handlePlaceOrder = () => {
@@ -235,6 +336,108 @@ export default function SupplyChainPage({ params }: PageProps) {
           trend="neutral"
         />
       </div>
+
+      {/* Quick Order: Product-driven material ordering */}
+      {productMaterialNeeds.length > 0 && (
+        <Card className="bg-slate-800 border-slate-700">
+          <CardHeader>
+            <CardTitle className="text-white flex items-center gap-2">
+              <ShoppingCart className="w-5 h-5 text-cyan-400" />
+              Quick Order — Materials for Your Products
+            </CardTitle>
+            <CardDescription className="text-slate-400">
+              Order all materials needed for your launched products with one click
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Product material needs */}
+            <div className="space-y-2">
+              {productMaterialNeeds.map((product, idx) => (
+                <div key={idx} className="p-3 bg-slate-700/30 rounded-lg">
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="text-white text-sm font-medium">{product.productName}</span>
+                    <Badge variant="outline" className="text-xs">{product.segment}</Badge>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {product.materials.map((mat, midx) => (
+                      <span key={midx} className="text-xs text-slate-400">
+                        {mat.type}: {formatCurrency(mat.costPerUnit)}/unit
+                      </span>
+                    ))}
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">
+                    {product.materials.length} materials &middot; {formatCurrency(product.totalCostPerUnit)}/unit &middot; ~{formatNumber(product.estimatedQuantity)} units
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            {/* Sourcing strategy selection */}
+            <div>
+              <p className="text-sm text-slate-300 mb-2 font-medium">Sourcing Strategy</p>
+              <div className="grid grid-cols-3 gap-3">
+                {(["economy", "standard", "premium"] as const).map((strat) => {
+                  const s = SOURCING_STRATEGIES[strat];
+                  const isSelected = sourcingStrategy === strat;
+                  return (
+                    <button
+                      key={strat}
+                      onClick={() => setSourcingStrategy(strat)}
+                      className={`p-3 rounded-lg border text-left transition-all ${
+                        isSelected
+                          ? `${s.bgColor} ${s.borderColor} ring-1 ring-offset-0`
+                          : "bg-slate-700/30 border-slate-600 hover:border-slate-500"
+                      }`}
+                    >
+                      <p className={`text-sm font-medium ${isSelected ? s.color : "text-white"}`}>{s.label}</p>
+                      <p className="text-xs text-slate-400 mt-1">
+                        Quality: {s.qualityMult === 1 ? "Baseline" : s.qualityMult > 1 ? `+${Math.round((s.qualityMult - 1) * 100)}%` : `${Math.round((s.qualityMult - 1) * 100)}%`}
+                      </p>
+                      <p className="text-xs text-slate-400">
+                        Cost: {s.costMult === 1 ? "Baseline" : s.costMult > 1 ? `+${Math.round((s.costMult - 1) * 100)}%` : `${Math.round((s.costMult - 1) * 100)}%`}
+                      </p>
+                      <p className="text-xs text-slate-400">
+                        Lead time: {s.leadTime} round{s.leadTime !== 1 ? "s" : ""}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Order summary + button */}
+            {bulkOrderPreview && (
+              <div className="flex items-center justify-between p-3 bg-slate-700/50 rounded-lg">
+                <div>
+                  <p className="text-sm text-slate-300">
+                    {bulkOrderPreview.totalItems} material orders &middot; arrives in ~{bulkOrderPreview.leadTime} round(s)
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    Quality multiplier: {bulkOrderPreview.qualityMultiplier}x &rarr; affects product quality scores
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-lg font-semibold text-white">{formatCurrency(bulkOrderPreview.totalCost)}</span>
+                  <Button
+                    className="bg-cyan-600 hover:bg-cyan-700"
+                    onClick={handleBulkOrder}
+                    disabled={placeOrderMutation.isPending || bulkOrderPreview.totalCost > cash}
+                  >
+                    {placeOrderMutation.isPending ? "Ordering..." : "Order All Materials"}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {bulkOrderPreview && bulkOrderPreview.totalCost > cash && (
+              <p className="text-red-400 text-xs">
+                <AlertTriangle className="w-3 h-3 inline mr-1" />
+                Insufficient cash. You need {formatCurrency(bulkOrderPreview.totalCost - cash)} more.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="grid w-full grid-cols-5">

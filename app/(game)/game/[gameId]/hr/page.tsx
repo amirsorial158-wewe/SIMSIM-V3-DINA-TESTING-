@@ -26,7 +26,7 @@ import { ModuleRecap } from "@/components/game/ModuleRecap";
 import { useHRPreview } from "@/lib/hooks/useHRPreview";
 import { useCrossModuleWarnings } from "@/lib/hooks/useCrossModuleWarnings";
 import { HiringRequirementsPanel } from "@/components/hr/HiringRequirementsPanel";
-import { calculateHiringRequirements } from "@/lib/hooks/calculateHiringRequirements";
+import { calculateHiringRequirementsDetailed } from "@/lib/hooks/calculateHiringRequirements";
 import { useFeatureFlag } from "@/lib/contexts/ComplexityContext";
 import { toast } from "sonner";
 import {
@@ -303,10 +303,11 @@ export default function HRPage({ params }: PageProps) {
   const warnings = useCrossModuleWarnings(state, "hr");
 
   // Hiring requirements
-  const hiringRequirements = useMemo(() => {
-    if (!state) return [];
-    return calculateHiringRequirements(state);
+  const hiringData = useMemo(() => {
+    if (!state) return { requirements: [], productStaffingNeeds: [] };
+    return calculateHiringRequirementsDetailed(state);
   }, [state]);
+  const hiringRequirements = hiringData.requirements;
 
   // Preview hook for live impact
   const hrPreview = useHRPreview(state, hr);
@@ -369,7 +370,7 @@ export default function HRPage({ params }: PageProps) {
       <WarningBanner warnings={warnings} />
 
       {/* Hiring requirements panel */}
-      <HiringRequirementsPanel requirements={hiringRequirements} />
+      <HiringRequirementsPanel requirements={hiringRequirements} productStaffingNeeds={hiringData.productStaffingNeeds} />
 
       {/* Main Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -1367,134 +1368,176 @@ export default function HRPage({ params }: PageProps) {
 
         {/* Workforce Tab */}
         <TabsContent value="workforce" className="space-y-6">
-          {/* Employee Summary when individual management is enabled */}
-          {hasEmployeeManagement && state?.employees && state.employees.length > 0 ? (
-            <Card className="bg-slate-800 border-slate-700">
-              <CardHeader>
-                <CardTitle className="text-white">Employee Roster</CardTitle>
-                <CardDescription className="text-slate-400">
-                  View and manage individual employees
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
+          {/* Workforce Summary Bar */}
+          {(() => {
+            const pendingHireCount = selectedCandidates.length;
+            const pendingFireCount = hr.fires.length;
+            const currentCount = state?.employees?.length ?? 0;
+            const afterRound = currentCount + pendingHireCount - pendingFireCount;
+            return (pendingHireCount > 0 || pendingFireCount > 0) ? (
+              <div className="flex items-center gap-4 p-3 bg-slate-700/50 rounded-lg text-sm">
+                <span className="text-slate-400">Current: <span className="text-white font-medium">{currentCount}</span></span>
+                {pendingHireCount > 0 && <span className="text-green-400">Hiring: +{pendingHireCount}</span>}
+                {pendingFireCount > 0 && <span className="text-red-400">Firing: -{pendingFireCount}</span>}
+                <span className="text-slate-400">After round: <span className="text-cyan-400 font-medium">{afterRound}</span></span>
+              </div>
+            ) : null;
+          })()}
+
+          {/* Unified Employee Roster (confirmed + pending hires + pending fires) */}
+          <Card className="bg-slate-800 border-slate-700">
+            <CardHeader>
+              <CardTitle className="text-white">Employee Roster</CardTitle>
+              <CardDescription className="text-slate-400">
+                {hasEmployeeManagement ? "View and manage individual employees" : "Current workforce overview"}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {hasEmployeeManagement && state?.employees && state.employees.length > 0 ? (
                 <div className="space-y-2 max-h-96 overflow-y-auto">
-                  {state.employees.slice(0, 20).map((employee) => (
-                    <div key={employee.id} className="flex items-center justify-between p-3 bg-slate-700/50 rounded-lg">
-                      <div className="flex items-center gap-3">
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                          employee.role === 'worker' ? 'bg-blue-600/20' :
-                          employee.role === 'engineer' ? 'bg-purple-600/20' : 'bg-green-600/20'
-                        }`}>
-                          {employee.role === 'worker' ? (
-                            <Briefcase className="w-4 h-4 text-blue-400" />
-                          ) : employee.role === 'engineer' ? (
-                            <GraduationCap className="w-4 h-4 text-purple-400" />
-                          ) : (
-                            <Award className="w-4 h-4 text-green-400" />
-                          )}
+                  {/* Confirmed employees */}
+                  {state.employees.slice(0, 30).map((employee) => {
+                    const isFiring = hr.fires.some(f => f.employeeId === employee.id);
+                    return (
+                      <div key={employee.id} className={`flex items-center justify-between p-3 rounded-lg ${
+                        isFiring ? "bg-red-900/20 border border-red-600/30" : "bg-slate-700/50"
+                      }`}>
+                        <div className="flex items-center gap-3">
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                            employee.role === 'worker' ? 'bg-blue-600/20' :
+                            employee.role === 'engineer' ? 'bg-purple-600/20' : 'bg-green-600/20'
+                          }`}>
+                            {employee.role === 'worker' ? (
+                              <Briefcase className="w-4 h-4 text-blue-400" />
+                            ) : employee.role === 'engineer' ? (
+                              <GraduationCap className="w-4 h-4 text-purple-400" />
+                            ) : (
+                              <Award className="w-4 h-4 text-green-400" />
+                            )}
+                          </div>
+                          <div>
+                            <p className="text-white text-sm font-medium">{employee.name}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="text-slate-400 text-xs capitalize">{employee.role}</p>
+                              {isFiring && <Badge className="bg-red-500/20 text-red-400 text-[10px]">Pending termination</Badge>}
+                            </div>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-white text-sm font-medium">{employee.name}</p>
-                          <p className="text-slate-400 text-xs capitalize">{employee.role}</p>
+                        <div className="flex items-center gap-4">
+                          <div className="text-right">
+                            <p className="text-slate-400 text-xs">Morale</p>
+                            <p className={`text-sm font-medium ${
+                              employee.morale >= 70 ? 'text-green-400' :
+                              employee.morale >= 50 ? 'text-yellow-400' : 'text-red-400'
+                            }`}>{employee.morale}%</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-slate-400 text-xs">Salary</p>
+                            <p className="text-green-400 text-sm font-medium">{formatCurrency(employee.salary)}</p>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className={isFiring ? "text-slate-400 hover:text-white h-8 px-2" : "text-red-400 hover:text-red-300 h-8 px-2"}
+                            onClick={() => {
+                              if (isFiring) {
+                                setHRDecisions({ fires: hr.fires.filter(f => f.employeeId !== employee.id) });
+                              } else {
+                                setHRDecisions({ fires: [...hr.fires, { employeeId: employee.id }] });
+                              }
+                            }}
+                          >
+                            {isFiring ? "Undo" : "Fire"}
+                          </Button>
                         </div>
                       </div>
-                      <div className="flex items-center gap-4">
-                        <div className="text-right">
-                          <p className="text-slate-400 text-xs">Morale</p>
-                          <p className={`text-sm font-medium ${
-                            employee.morale >= 70 ? 'text-green-400' :
-                            employee.morale >= 50 ? 'text-yellow-400' : 'text-red-400'
-                          }`}>{employee.morale}%</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-slate-400 text-xs">Efficiency</p>
-                          <p className="text-blue-400 text-sm font-medium">{employee.stats.efficiency}%</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-slate-400 text-xs">Salary</p>
-                          <p className="text-green-400 text-sm font-medium">{formatCurrency(employee.salary)}</p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                  {state.employees.length > 20 && (
+                    );
+                  })}
+                  {state.employees.length > 30 && (
                     <p className="text-center text-slate-400 text-sm py-2">
-                      + {state.employees.length - 20} more employees
+                      + {state.employees.length - 30} more employees
                     </p>
                   )}
+
+                  {/* Pending hires (from Recruitment tab) */}
+                  {selectedCandidates.length > 0 && (
+                    <>
+                      <div className="pt-2 pb-1">
+                        <p className="text-green-400 text-xs font-medium uppercase tracking-wider">Pending Hires — starts next round</p>
+                      </div>
+                      {selectedCandidates.map(candidateId => {
+                        const allCands = completedSearches.flatMap(s => s.candidates);
+                        const candidate = allCands.find(c => c.id === candidateId);
+                        if (!candidate) return null;
+                        return (
+                          <div key={candidateId} className="flex items-center justify-between p-3 bg-green-900/10 border border-green-600/20 rounded-lg">
+                            <div className="flex items-center gap-3">
+                              <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                                candidate.type === 'worker' ? 'bg-blue-600/20' :
+                                candidate.type === 'engineer' ? 'bg-purple-600/20' : 'bg-green-600/20'
+                              }`}>
+                                {candidate.type === 'worker' ? (
+                                  <Briefcase className="w-4 h-4 text-blue-400" />
+                                ) : candidate.type === 'engineer' ? (
+                                  <GraduationCap className="w-4 h-4 text-purple-400" />
+                                ) : (
+                                  <Award className="w-4 h-4 text-green-400" />
+                                )}
+                              </div>
+                              <div>
+                                <p className="text-white text-sm font-medium">{candidate.name}</p>
+                                <div className="flex items-center gap-2">
+                                  <p className="text-slate-400 text-xs capitalize">{candidate.type}</p>
+                                  <Badge className="bg-green-500/20 text-green-400 text-[10px]">Pending hire</Badge>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-4">
+                              <div className="text-right">
+                                <p className="text-slate-400 text-xs">Salary</p>
+                                <p className="text-green-400 text-sm font-medium">{formatCurrency(candidate.requestedSalary)}</p>
+                              </div>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="text-red-400 hover:text-red-300 h-8 px-2"
+                                onClick={() => setSelectedCandidates(prev => prev.filter(id => id !== candidateId))}
+                              >
+                                Remove
+                              </Button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </>
+                  )}
                 </div>
-              </CardContent>
-            </Card>
-          ) : (
-            <Card className="bg-slate-800 border-slate-700">
-              <CardHeader>
-                <CardTitle className="text-white">Employee Roster</CardTitle>
-                <CardDescription className="text-slate-400">
-                  View and manage your current workforce
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
+              ) : (
                 <div className="text-center py-12 text-slate-400">
                   <Users className="w-16 h-16 mx-auto mb-4 opacity-50" />
                   <p className="text-lg">Employee roster management</p>
                   <p className="text-sm mt-2">
                     {hasEmployeeManagement
-                      ? "No employees currently in your workforce."
+                      ? "No employees currently in your workforce. Go to Recruitment to hire staff."
                       : "Individual employee management is not enabled for this game."}
                   </p>
                 </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Layoffs */}
-          <Card className="bg-slate-800 border-slate-700">
-            <CardHeader>
-              <CardTitle className="text-white flex items-center gap-2">
-                <UserMinus className="w-5 h-5 text-red-400" />
-                Workforce Reduction
-              </CardTitle>
-              <CardDescription className="text-slate-400">
-                Reduce workforce to cut costs (affects morale)
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid md:grid-cols-3 gap-4">
-                {[
-                  { type: "Workers", current: workforceBreakdown.workers, min: 20 },
-                  { type: "Engineers", current: workforceBreakdown.engineers, min: 3 },
-                  { type: "Supervisors", current: workforceBreakdown.supervisors, min: 1 },
-                ].map((role) => (
-                  <div key={role.type} className="p-4 bg-slate-700/50 rounded-lg">
-                    <div className="text-slate-400 text-sm mb-2">{role.type}</div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="border-red-500 text-red-400"
-                        disabled={role.current <= role.min}
-                      >
-                        -
-                      </Button>
-                      <span className="text-white font-medium flex-1 text-center">
-                        {role.current}
-                      </span>
-                      <Button size="sm" variant="outline" className="border-slate-500" disabled>
-                        +
-                      </Button>
-                    </div>
-                    <div className="text-xs text-slate-500 mt-2 text-center">
-                      Min: {role.min}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-4 p-3 bg-red-900/20 border border-red-800 rounded-lg text-sm text-red-400">
-                <AlertTriangle className="w-4 h-4 inline mr-2" />
-                Layoffs significantly impact morale and may trigger voluntary departures
-              </div>
+              )}
             </CardContent>
           </Card>
+
+          {/* Firing impact warning */}
+          {hr.fires.length > 0 && (
+            <div className="p-3 bg-red-900/20 border border-red-800 rounded-lg text-sm text-red-400">
+              <AlertTriangle className="w-4 h-4 inline mr-2" />
+              Firing {hr.fires.length} employee(s) will incur severance costs and impact team morale.
+              {(() => {
+                const firedEmployees = (state?.employees ?? []).filter(e => hr.fires.some(f => f.employeeId === e.id));
+                const severanceCost = firedEmployees.reduce((sum, e) => sum + e.salary, 0);
+                return severanceCost > 0 ? ` Estimated severance: ${formatCurrency(severanceCost)} (1 month salary each).` : "";
+              })()}
+            </div>
+          )}
         </TabsContent>
       </Tabs>
 

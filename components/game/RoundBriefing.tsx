@@ -213,6 +213,25 @@ export function RoundBriefing({
                     <div className="text-[11px] text-slate-400">Market Share</div>
                   </div>
                 </div>
+
+                {/* Marketing Performance */}
+                {brandValue > 0 && (
+                  <div className="p-2.5 bg-pink-500/5 border border-pink-500/20 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-slate-400">Brand Value</span>
+                      <span className="text-sm font-medium text-pink-400">{(brandValue * 100).toFixed(0)}%</span>
+                    </div>
+                    {brandValue < 0.15 && (
+                      <p className="text-[10px] text-red-400 mt-0.5">Below critical mass — invest in marketing to avoid penalties</p>
+                    )}
+                    {brandValue >= 0.15 && brandValue < 0.4 && (
+                      <p className="text-[10px] text-amber-400 mt-0.5">Moderate brand — continued investment will boost General segment share</p>
+                    )}
+                    {brandValue >= 0.4 && (
+                      <p className="text-[10px] text-green-400 mt-0.5">Strong brand — significant market share advantage in brand-heavy segments</p>
+                    )}
+                  </div>
+                )}
               </motion.div>
             )}
 

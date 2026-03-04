@@ -245,12 +245,17 @@ export class MarketSimulator {
       // Calculate market shares using softmax
       const shares = this.calculateMarketShares(segmentPositions);
 
-      // Allocate sales based on shares
+      // Allocate sales based on shares, capped by production output
       const segmentDemand = totalDemand[segment];
       for (let i = 0; i < segmentPositions.length; i++) {
         const position = segmentPositions[i];
         const share = shares[i];
-        const units = Math.floor(segmentDemand * share);
+        const demandUnits = Math.floor(segmentDemand * share);
+
+        // Cap units sold by production output (inventory.finishedGoods[segment])
+        const team = teams.find(t => t.id === position.teamId);
+        const produced = team?.state?.inventory?.finishedGoods?.[segment as keyof typeof team.state.inventory.finishedGoods] ?? Infinity;
+        const units = Math.min(demandUnits, produced);
 
         position.marketShare = share;
         position.unitsSold = units;
@@ -259,7 +264,6 @@ export class MarketSimulator {
         // PATCH 5: Calculate warranty cost from defects
         // PATCH 6: Track revenue by region for FX impact
         if (position.product && units > 0) {
-          const team = teams.find(t => t.id === position.teamId);
           if (team && team.state.factories.length > 0) {
             // Use the first factory (TODO: match factory to product segment)
             const factory = team.state.factories[0];
